@@ -244,24 +244,44 @@ fn inspect_game_path_for_doctor(props_path: &Path) -> (Option<PathBuf>, Option<S
     }
 }
 
-fn managed_path_for_game(game_path: &Path) -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        game_path.join("OxygenNotIncluded_Data").join("Managed")
+/// Candidate `Managed` directories for a given game path, most specific first.
+///
+/// The macOS app bundle layout varies by Unity version: current ONI builds put the
+/// player data under `Contents/Resources/Data`, older Unity used `Contents/<Product>_Data`.
+/// Accept the game directory, the `.app` itself, or the `Contents` directory, so a user
+/// who pastes any of those in `onim setup` still gets a working config.
+pub fn managed_path_candidates(game_path: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    // Windows / Linux, and macOS when pointed straight at a Contents directory.
+    candidates.push(game_path.join("OxygenNotIncluded_Data").join("Managed"));
+    candidates.push(game_path.join("Resources").join("Data").join("Managed"));
+    candidates.push(game_path.join("Data").join("Managed"));
+
+    // macOS: the game directory containing the .app, or the .app itself.
+    for contents in [
+        game_path.join("OxygenNotIncluded.app").join("Contents"),
+        game_path.join("Contents"),
+    ] {
+        candidates.push(contents.join("Resources").join("Data").join("Managed"));
+        candidates.push(contents.join("OxygenNotIncluded_Data").join("Managed"));
+        candidates.push(contents.join("Data").join("Managed"));
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let mac_managed = game_path
-            .join("OxygenNotIncluded.app")
-            .join("Contents")
-            .join("OxygenNotIncluded_Data")
-            .join("Managed");
-        if mac_managed.exists() {
-            mac_managed
-        } else {
-            game_path.join("OxygenNotIncluded_Data").join("Managed")
-        }
-    }
+
+    candidates
+}
+
+/// Resolve the `Managed` directory, preferring one that actually contains the game
+/// assemblies. Falls back to the first candidate so callers still get a path to report
+/// in an error message when nothing matched.
+pub fn managed_path_for_game(game_path: &Path) -> PathBuf {
+    let candidates = managed_path_candidates(game_path);
+    candidates
+        .iter()
+        .find(|p| p.join("Assembly-CSharp.dll").exists())
+        .cloned()
+        .or_else(|| candidates.iter().find(|p| p.exists()).cloned())
+        .unwrap_or_else(|| candidates.into_iter().next().unwrap_or_default())
 }
 
 impl Config {

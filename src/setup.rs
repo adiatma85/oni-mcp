@@ -50,10 +50,10 @@ fn auto_detect() -> Option<PathBuf> {
     {
         let p = PathBuf::from(&home)
             .join("Library/Application Support/Steam/steamapps/common/OxygenNotIncluded");
-        let mac_managed = p.join(
-            "OxygenNotIncluded.app/Contents/OxygenNotIncluded_Data/Managed/Assembly-CSharp.dll",
-        );
-        if mac_managed.exists() {
+        if crate::config::managed_path_candidates(&p)
+            .iter()
+            .any(|m| m.join("Assembly-CSharp.dll").exists())
+        {
             return Some(p);
         }
     }
@@ -78,18 +78,7 @@ fn auto_detect() -> Option<PathBuf> {
 
 fn validate_game_path(path: &PathBuf) -> Result<Vec<String>> {
     let mut errors = vec![];
-    let managed = if cfg!(target_os = "macos") {
-        let mac = path.join("OxygenNotIncluded.app/Contents/OxygenNotIncluded_Data/Managed");
-        if mac.exists() {
-            mac
-        } else {
-            path.join("OxygenNotIncluded_Data/Managed")
-        }
-    } else if cfg!(target_os = "windows") {
-        path.join("OxygenNotIncluded_Data\\Managed")
-    } else {
-        path.join("OxygenNotIncluded_Data/Managed")
-    };
+    let managed = crate::config::managed_path_for_game(path);
 
     let required = [
         ("Assembly-CSharp.dll", "游戏主逻辑 DLL"),
@@ -227,7 +216,10 @@ path = "mods/OniModTemplate"
     fs::write(&config_path, toml_content).with_context(|| format!("写入 {} 失败", CONFIG_FILE))?;
 
     // 4. 写入 Directory.Build.props
-    let sep = std::path::MAIN_SEPARATOR_STR;
+    // Managed 目录按平台实际布局解析后写成绝对路径：
+    // macOS 的 .app 包把游戏数据放在 Contents/Resources/Data，和 Windows/Linux 不同，
+    // 直接用 $(OniGamePath)/OxygenNotIncluded_Data/Managed 拼接会得到不存在的路径。
+    let managed_path = crate::config::managed_path_for_game(&game_path);
     let props_content = format!(
         r#"<Project>
 
@@ -238,7 +230,7 @@ path = "mods/OniModTemplate"
   </PropertyGroup>
 
   <PropertyGroup>
-    <OniManagedPath>$(OniGamePath){}OxygenNotIncluded_Data{}Managed</OniManagedPath>
+    <OniManagedPath>{}</OniManagedPath>
   </PropertyGroup>
 
   <Target Name="ValidateOniGamePath" BeforeTargets="BeforeBuild">
@@ -248,8 +240,7 @@ path = "mods/OniModTemplate"
 </Project>
 "#,
         game_path.to_string_lossy().replace('"', "&quot;"),
-        sep,
-        sep
+        managed_path.to_string_lossy().replace('"', "&quot;")
     );
 
     println!("📝 写入 {} ...", BUILD_PROPS);
