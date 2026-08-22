@@ -222,7 +222,10 @@ fn is_game_running() -> bool {
 
     #[cfg(target_os = "macos")]
     {
-        process_name_running(&["OxygenNotIncluded"])
+        // The macOS bundle executable is `Contents/MacOS/Oxygen Not Included`, with spaces.
+        // `pgrep -x OxygenNotIncluded` never matches it, so onim reported the game as stopped
+        // while it was running. Exact matching still keeps OniUploader64 from false-positiving.
+        process_name_running(&["Oxygen Not Included", "OxygenNotIncluded"])
     }
 }
 
