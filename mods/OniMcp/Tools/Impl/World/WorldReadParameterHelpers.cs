@@ -115,6 +115,10 @@ namespace OniMcp.Tools
                 case "power":
                 case "电力":
                     return "power";
+                case "spom":
+                case "oxygen":
+                case "制氧模块":
+                    return "spom";
                 case "farm":
                 case "farming":
                 case "农业":
@@ -132,6 +136,9 @@ namespace OniMcp.Tools
                 case "barracks": return new LayoutSize(16, 4);
                 case "bathroom": return new LayoutSize(10, 4);
                 case "power": return new LayoutSize(12, 4);
+                // A SPOM needs vertical room: the hydrogen generator alone is 4x3 and the
+                // hydrogen pump has to sit at the ceiling for gas stratification to work.
+                case "spom": return new LayoutSize(12, 9);
                 case "farm": return new LayoutSize(18, 4);
                 default: return new LayoutSize(12, 4);
             }

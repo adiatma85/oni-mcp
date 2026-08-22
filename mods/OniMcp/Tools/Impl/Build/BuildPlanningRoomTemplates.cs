@@ -19,12 +19,12 @@ namespace OniMcp.Tools
                 Mode = "execute",
                 Risk = "dangerous",
                 Hidden = true,
-                Description = "Compatibility entrypoint: use building_control domain=planning action=room_template. kind=starter/toilet_lab is the one-call starter setup: dig interiors and build room shells, doors, outhouse, wash basin, and research station. execute=true confirm=true runs the full plan.",
+                Description = "Compatibility entrypoint: use building_control domain=planning action=room_template. kind=spom builds a self-powered oxygen module chamber. kind=starter/toilet_lab is the one-call starter setup: dig interiors and build room shells, doors, outhouse, wash basin, and research station. execute=true confirm=true runs the full plan.",
                 Parameters = new Dictionary<string, McpToolParameter>
                 {
-                    ["kind"] = new McpToolParameter { Type = "string", Description = "Template kind: toilet/restroom/lab/research/starter/toilet_lab.", Required = false },
+                    ["kind"] = new McpToolParameter { Type = "string", Description = "Template kind: toilet/restroom/lab/research/starter/toilet_lab/spom.", Required = false },
                     ["template"] = new McpToolParameter { Type = "string", Description = "Alias for kind.", Required = false },
-                    ["plan"] = new McpToolParameter { Type = "string", Description = "Natural template phrase, e.g. 完整厕所, 实验室, 厕所加实验室, 厕所实验室, 卫生间和研究站.", Required = false },
+                    ["plan"] = new McpToolParameter { Type = "string", Description = "Natural template phrase, e.g. 完整厕所, 实验室, 厕所加实验室, 制氧模块, SPOM.", Required = false },
                     ["areaId"] = new McpToolParameter { Type = "string", Description = "Preferred room candidate area handle.", Required = false },
                     ["query"] = new McpToolParameter { Type = "string", Description = "Search anchor when areaId/x/y are omitted, e.g. printing pod or oxygen pocket.", Required = false },
                     ["target"] = new McpToolParameter { Type = "string", Description = "Alias for query.", Required = false },
@@ -55,7 +55,7 @@ namespace OniMcp.Tools
             args = args ?? new JObject();
             string kind = ResolveRoomTemplateKind(args);
             if (string.IsNullOrEmpty(kind))
-                return CallToolResult.Error("kind/template/plan must mention toilet/restroom/lab/research/starter/toilet_lab.");
+                return CallToolResult.Error("kind/template/plan must mention toilet/restroom/lab/research/starter/toilet_lab/spom.");
 
             string anchorError;
             RoomTemplateAnchor anchor = ResolveRoomTemplateAnchor(args, kind, out anchorError);
@@ -71,6 +71,8 @@ namespace OniMcp.Tools
                 return CallToolResult.Error("confirm=true required with execute=true dryRun=false.");
 
             List<RoomTemplateCall> calls = BuildRoomTemplateCalls(kind, anchor, material, priority, topPriority, execute, dryRun);
+            RoomTemplateDefinition definition = GetRoomTemplateDefinition(kind);
+            List<string> locked = LockedTemplatePrefabs(definition);
             var response = new JObject
             {
                 ["ok"] = true,
@@ -79,6 +81,18 @@ namespace OniMcp.Tools
                 ["areaId"] = anchor.AreaId,
                 ["size"] = new JObject { ["width"] = anchor.Width, ["height"] = anchor.Height },
                 ["rooms"] = BuildRoomTemplateRoomSummary(kind, anchor),
+                ["techGate"] = new JObject
+                {
+                    ["buildable"] = locked.Count == 0,
+                    ["lockedPrefabs"] = new JArray(locked.ToArray()),
+                    ["note"] = locked.Count == 0
+                        ? (JToken)"All buildings in this template are researched."
+                        : "Not researched yet: " + string.Join(", ", locked.ToArray())
+                          + ". The room, shell and any unlocked machines will still be placed; these will fail until the tech is researched."
+                },
+                ["note"] = definition != null && !string.IsNullOrEmpty(definition.Note)
+                    ? (JToken)definition.Note
+                    : null,
                 ["priorityAction"] = new JObject { ["priority"] = priority, ["topPriority"] = topPriority },
                 ["executionPlan"] = BuildRoomTemplateExecutionPlan(kind, anchor, priority),
                 ["verificationPlan"] = BuildRoomTemplateVerificationPlan(kind, anchor, priority),
@@ -123,13 +137,15 @@ namespace OniMcp.Tools
         private static RoomTemplateAnchor BuildRoomTemplateAnchor(JObject args, string kind, int x, int y, int worldId, Dictionary<string, int> rect)
         {
             int inferredWidth = rect == null ? DefaultRoomTemplateWidth(kind) : rect["x2"] - rect["x1"] + 1;
-            int inferredHeight = rect == null ? 4 : rect["y2"] - rect["y1"] + 1;
+            int inferredHeight = rect == null ? DefaultRoomTemplateHeight(kind) : rect["y2"] - rect["y1"] + 1;
             return new RoomTemplateAnchor
             {
                 X = x,
                 Y = y,
                 Width = Math.Max(DefaultRoomTemplateWidth(kind), ToolUtil.GetInt(args, "width") ?? inferredWidth),
-                Height = Math.Max(4, ToolUtil.GetInt(args, "height") ?? inferredHeight),
+                // Height is a floor, not a default: a template whose machines do not fit in four
+                // rows (a SPOM needs nine) must not be silently squashed into an unbuildable room.
+                Height = Math.Max(DefaultRoomTemplateHeight(kind), ToolUtil.GetInt(args, "height") ?? inferredHeight),
                 WorldId = worldId,
                 AreaId = args["areaId"]?.ToString()
             };
@@ -172,14 +188,24 @@ namespace OniMcp.Tools
                 BuildCall("Door", material, OneAnchor(doorX, anchor.Y + 1), priority, topPriority, anchor.WorldId, execute, dryRun)
             };
 
-            if (kind == "toilet")
+            // Contents come from the catalog. An unknown kind yields no fixtures rather than
+            // silently falling through to a research station, which is what the previous
+            // if/else did.
+            RoomTemplateDefinition definition = GetRoomTemplateDefinition(kind);
+            if (definition != null)
             {
-                calls.Add(BuildCall("Outhouse", material, OneAnchor(anchor.X + 2, anchor.Y + 1), priority, topPriority, anchor.WorldId, execute, dryRun));
-                calls.Add(BuildCall("WashBasin", material, OneAnchor(anchor.X + Math.Max(4, anchor.Width - 3), anchor.Y + 1), priority, topPriority, anchor.WorldId, execute, dryRun));
-            }
-            else
-            {
-                calls.Add(BuildCall("ResearchCenter", material, OneAnchor(anchor.X + 2, anchor.Y + 1), priority, topPriority, anchor.WorldId, execute, dryRun));
+                foreach (RoomTemplatePlacement placement in definition.Placements)
+                {
+                    int px, py;
+                    ResolvePlacementCell(anchor, placement, out px, out py);
+                    calls.Add(BuildCall(placement.PrefabId, material, OneAnchor(px, py), priority, topPriority, anchor.WorldId, execute, dryRun));
+                }
+
+                if (definition.WireLaneDy.HasValue)
+                {
+                    JArray lane = HorizontalRunAnchors(anchor.X + 1, anchor.Y + definition.WireLaneDy.Value, anchor.Width - 2);
+                    calls.Add(BuildCall("Wire", material, lane, priority, topPriority, anchor.WorldId, execute, dryRun));
+                }
             }
 
             return calls;
@@ -257,6 +283,14 @@ namespace OniMcp.Tools
  return new JArray(Anchor(x, y));
  }
 
+ private static JArray HorizontalRunAnchors(int x, int y, int length)
+ {
+ var anchors = new JArray();
+ for (int offset = 0; offset < Math.Max(0, length); offset++)
+ anchors.Add(Anchor(x + offset, y));
+ return anchors;
+ }
+
  private static JArray VerticalWallAnchors(int x, int y, int height)
  {
  var anchors = new JArray();
@@ -285,14 +319,19 @@ namespace OniMcp.Tools
 
         private static JObject RoomSummary(string kind, RoomTemplateAnchor anchor)
         {
-            var core = kind == "toilet"
-                ? new JArray("Outhouse", "WashBasin")
-                : new JArray("ResearchCenter");
-            var coreCells = kind == "toilet"
-                ? new JArray(
-                    CoreCell("Outhouse", anchor.X + 2, anchor.Y + 1),
-                    CoreCell("WashBasin", anchor.X + Math.Max(4, anchor.Width - 3), anchor.Y + 1))
-                : new JArray(CoreCell("ResearchCenter", anchor.X + 2, anchor.Y + 1));
+            RoomTemplateDefinition definition = GetRoomTemplateDefinition(kind);
+            var core = new JArray();
+            var coreCells = new JArray();
+            if (definition != null)
+            {
+                foreach (RoomTemplatePlacement placement in definition.Placements)
+                {
+                    int px, py;
+                    ResolvePlacementCell(anchor, placement, out px, out py);
+                    core.Add(placement.PrefabId);
+                    coreCells.Add(CoreCell(placement.PrefabId, px, py));
+                }
+            }
             return new JObject
             {
                 ["kind"] = kind,
@@ -383,6 +422,12 @@ namespace OniMcp.Tools
         private static string ResolveRoomTemplateKind(JObject args)
         {
             string text = ((args["kind"] ?? args["template"] ?? args["plan"])?.ToString() ?? string.Empty).Trim().ToLowerInvariant();
+            // Checked before toilet/lab: a SPOM phrase can mention oxygen research or a lab
+            // wing, and the generic lab match would otherwise swallow it.
+            if (text.Contains("spom") || text.Contains("制氧模块") || text.Contains("自供电制氧")
+                || text.Contains("电解制氧") || (text.Contains("oxygen") && text.Contains("module")))
+                return "spom";
+
             bool wantsToilet = text.Contains("toilet") || text.Contains("restroom") || text.Contains("latrine") || text.Contains("厕所") || text.Contains("卫生间") || text.Contains("洗手");
             bool wantsLab = text.Contains("lab") || text.Contains("research") || text.Contains("实验") || text.Contains("研究");
             if (text.Contains("starter") || text.Contains("toilet_lab") || text.Contains("toilet+lab") || text.Contains("toilet lab") || text.Contains("厕所加实验室") || text.Contains("厕所和实验室") || text.Contains("厕所实验室") || (wantsToilet && wantsLab))
@@ -396,7 +441,18 @@ namespace OniMcp.Tools
 
         private static int DefaultRoomTemplateWidth(string kind)
         {
-            return kind == "starter" ? 15 : 8;
+            if (kind == "starter")
+                return 15;
+            RoomTemplateDefinition definition = GetRoomTemplateDefinition(kind);
+            return definition != null ? definition.DefaultWidth : 8;
+        }
+
+        private static int DefaultRoomTemplateHeight(string kind)
+        {
+            if (kind == "starter")
+                return 4;
+            RoomTemplateDefinition definition = GetRoomTemplateDefinition(kind);
+            return definition != null ? definition.DefaultHeight : 4;
         }
 
         private static bool TryGetInt(JObject args, string key, out int value)
@@ -413,7 +469,11 @@ namespace OniMcp.Tools
             try
             {
                 var obj = JObject.Parse(text);
-                string[] keys = { "planned", "marked", "executedCells", "remainingCells", "failed", "prefabId", "dryRun" };
+                // "planned" is always 0 on a utility path during a dry run, because nothing is
+                // committed; the real outcome lives in valid/success. Reporting planned alone
+                // made a healthy wire preflight read as a failure, so prefer success and valid
+                // whenever the payload carries them.
+                string[] keys = { "success", "valid", "pathCells", "planned", "marked", "executedCells", "remainingCells", "failed", "prefabId", "dryRun" };
                 var parts = keys.Where(k => obj[k] != null).Select(k => k + "=" + obj[k]).ToList();
                 return parts.Count == 0 ? "ok" : string.Join(", ", parts.ToArray());
             }
