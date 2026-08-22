@@ -63,7 +63,8 @@ namespace OniMcp.Tools
         private static ReadResourceResult ReadToolResource(string uri, string toolName, JObject arguments, string mimeType)
         {
             NormalizeResourceArguments(toolName, arguments);
-            var result = OniToolRegistry.CallTool(toolName, arguments);
+            EnsureResourceTaskDescription(uri, arguments);
+            var result = OniToolRegistry.CallToolFromResource(toolName, arguments);
             string text = ExtractText(result);
             if (result != null && result.IsError)
                 text = JsonConvert.SerializeObject(new Dictionary<string, object>
@@ -84,6 +85,25 @@ namespace OniMcp.Tools
                     }
                 }
             };
+        }
+
+        /// <summary>
+        /// Tool calls require a task description so the player can see what the agent is doing.
+        /// Resource reads are issued by the MCP client through a URI and carry no task of their
+        /// own, so synthesize one from the URI. Without this every tool-backed oni:// resource
+        /// fails the middleware check with "task is required".
+        /// A caller-supplied task always wins.
+        /// </summary>
+        private static void EnsureResourceTaskDescription(string uri, JObject arguments)
+        {
+            if (arguments == null)
+                return;
+
+            var existing = arguments[ToolCallMiddleware.TaskDescriptionParameter];
+            if (existing != null && !string.IsNullOrWhiteSpace(existing.ToString()))
+                return;
+
+            arguments[ToolCallMiddleware.TaskDescriptionParameter] = "read resource " + uri;
         }
 
         private static void NormalizeResourceArguments(string toolName, JObject arguments)
@@ -265,7 +285,14 @@ namespace OniMcp.Tools
             };
         }
 
-        private static OniResource Resource(string uri, string name, string title, string description, string toolName, JObject arguments)
+        /// <summary>
+        /// Register a resource backed by a tool call.
+        /// <paramref name="name"/> is the registered tool name to invoke (also used as the MCP
+        /// resource name). <paramref name="callHint"/> is the human-readable equivalent command
+        /// shown to clients, e.g. "colony_control domain=read action=status" — it is documentation,
+        /// not a dispatch key, and must never be passed to the tool registry.
+        /// </summary>
+        private static OniResource Resource(string uri, string name, string title, string description, string callHint, JObject arguments)
         {
             return new OniResource
             {
@@ -277,7 +304,8 @@ namespace OniMcp.Tools
                     Description = description,
                     MimeType = "application/json"
                 },
-                ToolName = toolName,
+                ToolName = name,
+                CallHint = callHint,
                 Arguments = arguments
             };
         }
@@ -286,6 +314,7 @@ namespace OniMcp.Tools
         {
             public McpResourceInfo Info { get; set; }
             public string ToolName { get; set; }
+            public string CallHint { get; set; }
             public JObject Arguments { get; set; }
         }
 
@@ -401,6 +430,8 @@ namespace OniMcp.Tools
                     Resource("oni://ui/actions", "game_control", "UI Action 白名单", "可安全触发的管理菜单、覆盖层、建造分类和导航 Action。", "game_control domain=ui uiDomain=action action=list", new JObject { ["domain"] = "ui", ["uiDomain"] = "action", ["action"] = "list" }),
                     Resource("oni://tools/manifest", "server_control", "工具清单", "ONI MCP 工具目录。", "server_control domain=catalog action=manifest", new JObject { ["domain"] = "catalog", ["action"] = "manifest" }),
                     Resource("oni://tools/guide", "server_control", "工具意图指南", "按玩家目标推荐资源、工具链和批量策略。", "server_control domain=catalog action=guide", new JObject { ["domain"] = "catalog", ["action"] = "guide" }),
+                    Resource("oni://strategy/index", "server_control", "攻略知识库索引", "静态缺氧攻略知识库概览：主题分类、DLC 分布和用法。", "server_control domain=strategy action=index", new JObject { ["domain"] = "strategy", ["action"] = "index" }),
+                    Resource("oni://strategy/categories", "server_control", "攻略知识库分类", "攻略知识库的主题分类和条目数量。", "server_control domain=strategy action=categories", new JObject { ["domain"] = "strategy", ["action"] = "categories" }),
                     Resource("oni://tools/player-action-coverage", "server_control", "玩家操作覆盖审计", "玩家可执行操作面、对应 MCP 工具和缺口状态。", "server_control domain=catalog action=coverage", new JObject { ["domain"] = "catalog", ["action"] = "coverage" }),
                     Resource("oni://tools/side-screen-surfaces", "server_control", "侧屏 surface 审计", "运行时 SideScreenContent 类型到 MCP 工具/资源覆盖的映射审计。", "server_control domain=catalog action=surface_audit surface=side_screen", new JObject { ["domain"] = "catalog", ["action"] = "surface_audit", ["surface"] = "side_screen" }),
                     Resource("oni://tools/user-menu-surfaces", "server_control", "用户菜单 surface 审计", "源码 UserMenu/context-menu 按钮来源到 MCP 工具/资源覆盖的映射审计。", "server_control domain=catalog action=surface_audit surface=user_menu", new JObject { ["domain"] = "catalog", ["action"] = "surface_audit", ["surface"] = "user_menu" }),

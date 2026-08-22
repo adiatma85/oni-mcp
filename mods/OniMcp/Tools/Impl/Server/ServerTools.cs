@@ -24,26 +24,28 @@ namespace OniMcp.Tools
                 Mode = "read/execute",
                 Risk = "medium",
                 Aliases = new List<string> { "mcp_server_control", "server_diagnostics_control", "mcp_client_request_control", "tools_catalog_control", "tools_call_many", "agent_program_execute" },
-                Description = "服务器/MCP 组合入口：domain=diagnostics action=status/capabilities/logs_tail；domain=client_request action=create_sampling/create_elicitation；domain=catalog action=manifest/search/guide/coverage/static_audit/surface_audit；domain=batch action=call_many 批量调用工具；domain=program action=execute 执行受限流程 DSL",
+                Description = "服务器/MCP 组合入口：domain=diagnostics action=status/capabilities/logs_tail；domain=client_request action=create_sampling/create_elicitation；domain=catalog action=manifest/search/guide/coverage/static_audit/surface_audit；domain=strategy action=query/categories/index 检索静态缺氧攻略知识库；domain=batch action=call_many 批量调用工具；domain=program action=execute 执行受限流程 DSL",
                 Parameters = new Dictionary<string, McpToolParameter>
                 {
-                    ["domain"] = new McpToolParameter { Type = "string", Description = "diagnostics、client_request、catalog、batch、program 或 middleware，默认 diagnostics", Required = false, EnumValues = new List<string> { "diagnostics", "client_request", "catalog", "batch", "program", "middleware" } },
-                    ["action"] = new McpToolParameter { Type = "string", Description = "diagnostics: status/capabilities/logs_tail；client_request: create_sampling/create_elicitation；catalog: manifest/search/guide/coverage/static_audit/surface_audit；batch: call_many；program: execute；middleware: queue/status/clear", Required = true },
+                    ["domain"] = new McpToolParameter { Type = "string", Description = "diagnostics、client_request、catalog、strategy、batch、program 或 middleware，默认 diagnostics", Required = false, EnumValues = new List<string> { "diagnostics", "client_request", "catalog", "strategy", "batch", "program", "middleware" } },
+                    ["action"] = new McpToolParameter { Type = "string", Description = "diagnostics: status/capabilities/logs_tail；client_request: create_sampling/create_elicitation；catalog: manifest/search/guide/coverage/static_audit/surface_audit；strategy: query/categories/index；batch: call_many；program: execute；middleware: queue/status/clear", Required = true },
                     ["file"] = new McpToolParameter { Type = "string", Description = "diagnostics logs_tail：current 或 previous", Required = false },
                     ["lines"] = new McpToolParameter { Type = "integer", Description = "diagnostics logs_tail：返回末尾行数，默认 120，最大 1000", Required = false },
                     ["filter"] = new McpToolParameter { Type = "string", Description = "diagnostics logs_tail：可选关键词过滤", Required = false },
                     ["surface"] = new McpToolParameter { Type = "string", Description = "catalog surface_audit：side_screen/user_menu/management/tool_menu/ui_menu/global_control/notification", Required = false, EnumValues = new List<string> { "side_screen", "user_menu", "management", "tool_menu", "ui_menu", "global_control", "notification" } },
-                    ["query"] = new McpToolParameter { Type = "string", Description = "catalog manifest/search/coverage/surface_audit 的关键词或目标意图", Required = false },
+                    ["query"] = new McpToolParameter { Type = "string", Description = "catalog manifest/search/coverage/surface_audit 的关键词或目标意图；strategy query 的攻略关键词，支持中英文", Required = false },
+                    ["category"] = new McpToolParameter { Type = "string", Description = "strategy query：按主题过滤，例如 oxygen、thermal、gas_fluid、power、food、farming、ranching、automation、dupes、space", Required = false },
+                    ["dlc"] = new McpToolParameter { Type = "string", Description = "strategy query：按游戏版本过滤 base/spaced_out/any，标记为 both 的条目始终匹配，默认 any", Required = false, EnumValues = new List<string> { "base", "spaced_out", "any" } },
                     ["goal"] = new McpToolParameter { Type = "string", Description = "catalog guide 的玩家目标或操作意图", Required = false },
                     ["group"] = new McpToolParameter { Type = "string", Description = "catalog manifest/search/coverage 的工具或操作分组过滤", Required = false },
                     ["mode"] = new McpToolParameter { Type = "string", Description = "catalog manifest/search 过滤 read/write/execute/any", Required = false },
                     ["risk"] = new McpToolParameter { Type = "string", Description = "catalog manifest/search/static_audit 过滤 none/low/medium/dangerous/any", Required = false },
                     ["status"] = new McpToolParameter { Type = "string", Description = "catalog coverage/surface_audit 状态过滤", Required = false, EnumValues = new List<string> { "all", "covered", "partial", "missing", "review", "no_action" } },
-                    ["detail"] = new McpToolParameter { Type = "string", Description = "catalog 返回细节：brief/compact/full，按 action 支持", Required = false },
+                    ["detail"] = new McpToolParameter { Type = "string", Description = "catalog 返回细节：brief/compact/full，按 action 支持；strategy query 支持 brief/full，默认 full", Required = false },
                     ["includeResources"] = new McpToolParameter { Type = "boolean", Description = "catalog coverage 是否返回 resourceAnchors", Required = false },
                     ["includeHotkeys"] = new McpToolParameter { Type = "boolean", Description = "catalog coverage 是否返回游戏 Action 枚举热键覆盖摘要", Required = false },
                     ["includeNoAction"] = new McpToolParameter { Type = "boolean", Description = "catalog surface_audit surface=side_screen 是否返回纯显示/无玩家操作侧屏", Required = false },
-                    ["limit"] = new McpToolParameter { Type = "integer", Description = "catalog manifest/search/coverage 最多返回多少项", Required = false },
+                    ["limit"] = new McpToolParameter { Type = "integer", Description = "catalog manifest/search/coverage 最多返回多少项；strategy query 默认 8，最大 40", Required = false },
                     ["calls"] = new McpToolParameter { Type = "array", Description = "domain=batch action=call_many：要调用的工具数组，格式为 [{\"name\":\"tool_name\",\"arguments\":{...}}]，也兼容短字段 {t,a}；最多 20 个", Required = false },
                     ["items"] = new McpToolParameter { Type = "array", Description = "domain=batch action=call_many：calls 的别名", Required = false },
                     ["defaults"] = new McpToolParameter { Type = "object", Description = "domain=batch action=call_many：合并到每个子调用 arguments 的默认参数对象；子调用同名参数优先", Required = false },
@@ -84,6 +86,12 @@ namespace OniMcp.Tools
                         forwarded.Remove("domain");
                         return ToolCatalogTools.ControlToolCatalog().Handler(forwarded);
                     }
+                    if (domain == "strategy" || domain == "knowledge_base" || domain == "advice")
+                    {
+                        var forwarded = new JObject(args);
+                        forwarded.Remove("domain");
+                        return StrategyKnowledgeTools.ControlStrategy().Handler(forwarded);
+                    }
                     if (domain == "batch" || domain == "call_many" || domain == "many")
                         return ToolBatchTools.CallMany().Handler(args);
                     if (domain == "middleware" || domain == "tool_middleware" || domain == "notice")
@@ -95,7 +103,7 @@ namespace OniMcp.Tools
                             return AgentProgramTools.ExecuteProgram().Handler(args);
                         return CallToolResult.Error("domain=program action must be execute");
                     }
-                    return CallToolResult.Error("domain must be diagnostics, client_request, catalog, batch, program, or middleware");
+                    return CallToolResult.Error("domain must be diagnostics, client_request, catalog, strategy, batch, program, or middleware");
                 }
             };
         }
