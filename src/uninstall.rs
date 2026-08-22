@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use std::fs;
 
@@ -15,14 +16,14 @@ pub fn run(cfg: &Config, selected: &SelectedMod, scope: UninstallScope) -> Resul
         UninstallScope::Dev | UninstallScope::All => {
             if dev_dir.exists() {
                 fs::remove_dir_all(&dev_dir)
-                    .with_context(|| format!("卸载 Dev 目录失败：{}", dev_dir.display()))?;
-                uninstalled.push(format!("Dev/{} 已删除", selected.name));
+                    .with_context(|| i18n::err_uninstall_dev(dev_dir.display().to_string()))?;
+                uninstalled.push(i18n::removed_dev(selected.name.to_string()));
             }
             if legacy_dev_dir != dev_dir && legacy_dev_dir.exists() {
                 fs::remove_dir_all(&legacy_dev_dir).with_context(|| {
-                    format!("卸载旧版小写 dev 目录失败：{}", legacy_dev_dir.display())
+                    i18n::err_uninstall_dev_lower(legacy_dev_dir.display().to_string())
                 })?;
-                uninstalled.push(format!("dev/{} 已删除（旧版错误目录）", selected.name));
+                uninstalled.push(i18n::removed_dev_lower(selected.name.to_string()));
             }
         }
         _ => {}
@@ -32,17 +33,17 @@ pub fn run(cfg: &Config, selected: &SelectedMod, scope: UninstallScope) -> Resul
         UninstallScope::Local | UninstallScope::All => {
             if local_dir.exists() {
                 fs::remove_dir_all(&local_dir)
-                    .with_context(|| format!("卸载 Local 目录失败：{}", local_dir.display()))?;
-                uninstalled.push(format!("Local/{} 已删除", selected.name));
+                    .with_context(|| i18n::err_uninstall_local(local_dir.display().to_string()))?;
+                uninstalled.push(i18n::removed_local(selected.name.to_string()));
             }
         }
         _ => {}
     }
 
     if uninstalled.is_empty() {
-        println!("ℹ️  '{}' 没有安装在任何目录中", selected.name);
+        println!("ℹ️  {}", i18n::not_installed_anywhere(selected.name.to_string()));
     } else {
-        println!("✅ 已卸载 '{}'：", selected.name);
+        println!("✅ {}", i18n::uninstalled(selected.name.to_string()));
         for msg in uninstalled {
             println!("   {}", msg);
         }

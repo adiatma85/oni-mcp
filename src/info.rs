@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
@@ -62,12 +63,12 @@ pub fn run(cfg: &Config) -> Result<()> {
     let local_dir = mods_dir.join("Local");
     let steam_dir = mods_dir.join("Steam");
 
-    println!("📁 游戏 Mod 目录：{}\n", mods_dir.display());
+    println!("📁 {}\n", i18n::game_mods_dir(mods_dir.display().to_string()));
 
     // Dev mods
     let dev_mods = scan_mods_dir(&dev_dir);
     if !dev_mods.is_empty() {
-        println!("🔧 [Dev] 开发测试 Mod ({} 个)：", dev_mods.len());
+        println!("🔧 {}{}", i18n::section_dev(dev_mods.len()), i18n::sep().trim_end());
         for (name, info) in &dev_mods {
             print_mod_info(&name, info);
         }
@@ -76,10 +77,7 @@ pub fn run(cfg: &Config) -> Result<()> {
 
     let legacy_dev_mods = scan_mods_dir(&legacy_dev_dir);
     if !legacy_dev_mods.is_empty() {
-        println!(
-            "⚠️  [dev] 旧版小写目录（ONI 在 Linux 上不会扫描，{} 个）：",
-            legacy_dev_mods.len()
-        );
+        println!("⚠️  {}{}", i18n::section_dev_lower(legacy_dev_mods.len()), i18n::sep().trim_end());
         for (name, info) in &legacy_dev_mods {
             print_mod_info(&name, info);
         }
@@ -89,7 +87,7 @@ pub fn run(cfg: &Config) -> Result<()> {
     // Local mods
     let local_mods = scan_mods_dir(&local_dir);
     if !local_mods.is_empty() {
-        println!("📦 [Local] 本地安装 Mod ({} 个)：", local_mods.len());
+        println!("📦 {}{}", i18n::section_local(local_mods.len()), i18n::sep().trim_end());
         for (name, info) in &local_mods {
             print_mod_info(&name, info);
         }
@@ -99,7 +97,7 @@ pub fn run(cfg: &Config) -> Result<()> {
     // Steam workshop mods
     let steam_mods = scan_mods_dir(&steam_dir);
     if !steam_mods.is_empty() {
-        println!("🌐 [Steam] 创意工坊 Mod ({} 个)：", steam_mods.len());
+        println!("🌐 {}{}", i18n::section_steam(steam_mods.len()), i18n::sep().trim_end());
         for (name, _info) in &steam_mods {
             println!("   • {} (Steam Workshop)", name);
         }
@@ -111,7 +109,7 @@ pub fn run(cfg: &Config) -> Result<()> {
         && local_mods.is_empty()
         && steam_mods.is_empty()
     {
-        println!("ℹ️  没有检测到任何已安装的 Mod");
+        println!("ℹ️  {}", i18n::no_mods_installed());
     }
 
     Ok(())
@@ -136,7 +134,7 @@ fn print_mod_info(name: &str, info: &Option<HashMap<String, String>>) {
             }
         }
         None => {
-            println!("   • {} (无 mod.yaml)", name);
+            println!("{}", i18n::no_mod_yaml(name.to_string()));
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
@@ -86,7 +87,7 @@ fn generate_vdf(
         safe_changenote,
     );
     fs::write(&vdf_path, content)
-        .with_context(|| format!("写入 vdf 失败：{}", vdf_path.display()))?;
+        .with_context(|| i18n::err_vdf_write(vdf_path.display().to_string()))?;
     Ok(vdf_path)
 }
 
@@ -254,7 +255,7 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
         .unwrap_or_else(|| env::current_dir().unwrap());
 
     let assembly_name = selected.assembly_name(&repo_root);
-    println!("🚀 准备发布：{}...", selected.name);
+    println!("🚀 {}", i18n::preparing_publish(selected.name.to_string()));
     build::run(cfg, selected, true)?;
 
     let dist_mod = cfg.dist_dir(&repo_root).join(&assembly_name);
@@ -262,7 +263,7 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
     // 检查 mod_info.yaml
     let mod_info = dist_mod.join("mod_info.yaml");
     if !mod_info.exists() {
-        println!("⚠️  警告：找不到 mod_info.yaml");
+        println!("⚠️  {}", i18n::warn_no_mod_info());
     }
 
     // 检查预览图
@@ -273,25 +274,22 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
     } else if preview_jpg.exists() {
         preview_jpg
     } else {
-        println!("\n⚠️  未找到预览图 (preview.png / preview.jpg)");
-        println!("   OniUploader / SteamCMD 都需要预览图。");
-        println!(
-            "   建议：在 {} 下放一张 preview.png",
-            selected.config.project_abs(&repo_root).display()
-        );
-        anyhow::bail!("缺少预览图");
+        println!("\n⚠️  {}", i18n::no_preview_image());
+        println!("{}", i18n::preview_required());
+        println!("{}", i18n::preview_suggestion(selected.config.project_abs(&repo_root).display().to_string()));
+        anyhow::bail!("{}", i18n::err_missing_preview());
     };
 
     // 强制使用 GUI
     if use_gui {
-        println!("\n📌 已强制指定使用 OniUploader GUI");
+        println!("\n📌 {}", i18n::forced_oniuploader());
         launch_uploader(&dist_mod, &preview);
         return Ok(());
     }
 
     // 尝试 SteamCMD 全自动上传
     if has_steamcmd() {
-        println!("\n📡 检测到 steamcmd，支持全自动上传！");
+        println!("\n📡 {}", i18n::steamcmd_detected());
         let (title, desc, version) = read_mod_info(&dist_mod)
             .unwrap_or_else(|| (selected.name.clone(), String::new(), "1.0.0".to_string()));
         let project_dir = selected.config.project_abs(&repo_root);
@@ -304,16 +302,16 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
             default_changenote.clone()
         } else {
             prompt(
-                &format!("更新说明 [默认: {}]: ", default_changenote),
+                &i18n::changelog_prompt(default_changenote.clone()),
                 Some(default_changenote.as_str()),
             )?
         };
 
         let publishedfileid = if let Some(ref id) = selected.config.publishedfileid {
-            println!("   使用配置中的 Workshop ID: {}", id);
+            println!("{}", i18n::using_configured_workshop_id(id.to_string()));
             id.clone()
         } else {
-            let id = prompt("已有 Workshop ID？（首次上传留空）: ", Some("0"))?;
+            let id = prompt(i18n::workshop_id_prompt(), Some("0"))?;
             if id.trim().is_empty() {
                 "0".to_string()
             } else {
@@ -329,11 +327,11 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
             &changenote,
             &publishedfileid,
         )?;
-        println!("\n📤 开始上传...");
+        println!("\n📤 {}", i18n::upload_starting());
         println!("   vdf: {}", vdf.display());
 
-        let steam_user = prompt("Steam 用户名: ", None)?;
-        println!("\n📤 正在上传，请稍候...");
+        let steam_user = prompt(i18n::steam_username_prompt(), None)?;
+        println!("\n📤 {}", i18n::uploading_wait());
         let output = Command::new("steamcmd")
             .args([
                 "+login",
@@ -343,7 +341,7 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
                 "+quit",
             ])
             .output()
-            .context("启动 steamcmd 失败")?;
+            .with_context(|| i18n::err_steamcmd_spawn())?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -354,18 +352,18 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
             let workshop_id =
                 extract_workshop_id(&full_output).or_else(|| read_publishedfileid_from_vdf(&vdf));
 
-            println!("✅ 上传完成！");
+            println!("✅ {}", i18n::upload_done());
             println!();
 
             if let Some(ref id) = workshop_id {
-                println!("🔗 Steam 创意工坊链接：");
+                println!("🔗 {}", i18n::workshop_link());
                 println!(
                     "   https://steamcommunity.com/sharedfiles/filedetails/?id={}",
                     id
                 );
                 println!();
             } else if publishedfileid != "0" {
-                println!("🔗 Steam 创意工坊链接：");
+                println!("🔗 {}", i18n::workshop_link());
                 println!(
                     "   https://steamcommunity.com/sharedfiles/filedetails/?id={}",
                     publishedfileid
@@ -373,22 +371,19 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
                 println!();
             }
 
-            println!("⚠️  重要提示：SteamCMD 上传无法设置 Tags（类别）！");
-            println!("   请前往 Steam 创意工坊页面手动补充：");
-            println!("   1. 登录 Steam → 创意工坊 → 你的物品");
-            println!("   2. 编辑 Mod → 添加 Tags（如 Buildings、Quality of Life 等）");
-            println!("   3. 保存更改");
+            println!("⚠️  {}", i18n::steamcmd_no_tags());
+            println!("{}", i18n::tags_manual_1());
+            println!("{}", i18n::tags_manual_2());
+            println!("{}", i18n::tags_manual_3());
+            println!("{}", i18n::tags_manual_4());
             println!();
 
             if workshop_id.is_none() && publishedfileid == "0" {
-                println!(
-                    "   首次上传，Workshop ID 已写入 {}，下次可直接更新。",
-                    vdf.display()
-                );
+                println!("{}", i18n::first_upload_id_saved(vdf.display().to_string()));
             }
         } else {
-            eprintln!("❌ steamcmd 错误输出：\n{}", stderr);
-            println!("\n回退到 OniUploader GUI...");
+            eprintln!("❌ {}", i18n::steamcmd_stderr(stderr.to_string()));
+            println!("\n{}", i18n::fallback_to_gui());
             launch_uploader(&dist_mod, &preview);
         }
 
@@ -451,25 +446,25 @@ fn launch_uploader(dist_mod: &PathBuf, preview: &PathBuf) {
     let uploader = match uploader_path() {
         Some(p) => p,
         None => {
-            println!("\n❌ 找不到上传工具！");
-            println!("方案一（推荐）：安装 steamcmd 实现全自动上传");
+            println!("\n❌ {}", i18n::no_upload_tool());
+            println!("{}", i18n::option_one());
             println!("  Arch:    paru -S steamcmd");
             println!("  Ubuntu:  sudo apt install steamcmd");
-            println!("  其他:    https://developer.valvesoftware.com/wiki/SteamCMD");
+            println!("{}", i18n::option_one_other());
             println!();
-            println!("方案二：从 Steam 库 → 工具 → 安装 'Oxygen Not Included Uploader'");
+            println!("{}", i18n::option_two());
             return;
         }
     };
 
-    println!("\n📤 启动 OniUploader...");
+    println!("\n📤 {}", i18n::launching_oniuploader());
     println!("   {}", uploader.display());
     println!();
-    println!("请按以下步骤操作：");
-    println!("  1. 点击 'Add' 添加新 Mod");
-    println!("  2. Mod 目录选择：{}", dist_mod.display());
-    println!("  3. 预览图已就绪：{}", preview.display());
-    println!("  4. 填写信息后点击 'Publish'");
+    println!("{}", i18n::follow_steps());
+    println!("{}", i18n::step_add());
+    println!("{}", i18n::step_mod_dir(dist_mod.display().to_string()));
+    println!("{}", i18n::step_preview_ready(preview.display().to_string()));
+    println!("{}", i18n::step_publish());
     println!();
 
     #[cfg(target_os = "linux")]

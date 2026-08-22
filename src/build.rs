@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use std::env;
 use std::path::PathBuf;
@@ -11,24 +12,24 @@ pub fn run(cfg: &Config, selected: &SelectedMod, release: bool) -> Result<()> {
         .unwrap_or_else(|| env::current_dir().unwrap());
 
     let mod_project = selected.config.project_abs(&repo_root);
-    println!("📦 构建 Mod: {} ({})", selected.name, mod_project.display());
+    println!("📦 {}", i18n::building_mod(selected.name.to_string(), mod_project.display().to_string()));
 
     let mut cmd = Command::new("dotnet");
     cmd.arg("build").current_dir(&mod_project);
 
     if release {
         cmd.args(["-c", "Release"]);
-        println!("   模式: Release");
+        println!("{}", i18n::mode_release());
     } else {
-        println!("   模式: Debug");
+        println!("{}", i18n::mode_debug());
     }
 
     let status = cmd
         .status()
-        .context("执行 dotnet build 失败，请确认已安装 .NET SDK")?;
+        .with_context(|| i18n::err_dotnet_build_spawn())?;
 
     if !status.success() {
-        anyhow::bail!("dotnet build 失败");
+        anyhow::bail!("{}", i18n::err_dotnet_build_failed());
     }
 
     // 显示产物
@@ -37,7 +38,7 @@ pub fn run(cfg: &Config, selected: &SelectedMod, release: bool) -> Result<()> {
     let zip = dist.join(format!("{}.zip", assembly_name));
     let src = dist.join(format!("{}-src.tar.gz", assembly_name));
 
-    println!("✅ 构建成功！");
+    println!("✅ {}", i18n::build_ok());
     if zip.exists() {
         println!("   📁 {}", zip.display());
     }

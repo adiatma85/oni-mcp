@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::env;
@@ -24,33 +25,33 @@ pub fn run(cfg: &Config, selected: &SelectedMod) -> Result<()> {
     let zip = dist.join(format!("{}.zip", assembly_name));
 
     if !zip.exists() {
-        anyhow::bail!("找不到构建产物：{}", zip.display());
+        anyhow::bail!("{}", i18n::err_artifact_missing(zip.display().to_string()));
     }
 
     let dev_dir = cfg.dev_mod_dir(&selected.name)?;
     let legacy_dev_dir = cfg.legacy_dev_mod_dir(&selected.name)?;
-    println!("\n🔧 安装到 Dev 目录：{}", dev_dir.display());
+    println!("\n🔧 {}", i18n::installing_dev(dev_dir.display().to_string()));
 
     if dev_dir.exists() {
         fs::remove_dir_all(&dev_dir)
-            .with_context(|| format!("清理旧 Dev 目录失败：{}", dev_dir.display()))?;
+            .with_context(|| i18n::err_clean_dev(dev_dir.display().to_string()))?;
     }
     if legacy_dev_dir != dev_dir && legacy_dev_dir.exists() {
         fs::remove_dir_all(&legacy_dev_dir)
-            .with_context(|| format!("清理旧版小写 dev 目录失败：{}", legacy_dev_dir.display()))?;
+            .with_context(|| i18n::err_clean_dev_lower(legacy_dev_dir.display().to_string()))?;
     }
     fs::create_dir_all(&dev_dir)
-        .with_context(|| format!("创建 Dev 目录失败：{}", dev_dir.display()))?;
+        .with_context(|| i18n::err_create_dev(dev_dir.display().to_string()))?;
 
     archive::unzip(&zip, &dev_dir)?;
     enable_dev_mod(cfg, selected, &dev_dir)?;
 
-    println!("✅ 已安装到游戏 Dev 目录");
+    println!("✅ {}", i18n::dev_installed());
 
     if is_game_running() {
-        println!("⚠️  检测到游戏正在运行，需要重启游戏才能加载新版本的 Mod");
+        println!("⚠️  {}", i18n::dev_restart_needed());
     } else {
-        println!("💡 游戏未运行，启动游戏后在 Mod 列表中启用即可");
+        println!("💡 {}", i18n::dev_not_running());
     }
 
     Ok(())
@@ -60,22 +61,19 @@ fn enable_dev_mod(cfg: &Config, selected: &SelectedMod, dev_dir: &Path) -> Resul
     let static_id = read_static_id(dev_dir).unwrap_or_else(|| format!("local.{}", selected.name));
     let mods_file = cfg.game_mods_dir()?.join("mods.json");
     if !mods_file.exists() {
-        println!(
-            "⚠️  未找到 mods.json，首次进游戏后仍需确认启用 '{}'",
-            selected.name
-        );
+        println!("⚠️  {}", i18n::mods_json_absent(selected.name.to_string()));
         return Ok(());
     }
 
     let content = fs::read_to_string(&mods_file)
-        .with_context(|| format!("读取 mods.json 失败：{}", mods_file.display()))?;
+        .with_context(|| i18n::err_mods_json_read(mods_file.display().to_string()))?;
     let mut data: Value = serde_json::from_str(&content)
-        .with_context(|| format!("解析 mods.json 失败：{}", mods_file.display()))?;
+        .with_context(|| i18n::err_mods_json_parse(mods_file.display().to_string()))?;
     let (before_enabled, after_enabled) = {
         let mods = data
             .get_mut("mods")
             .and_then(Value::as_array_mut)
-            .context("mods.json 缺少 mods 数组")?;
+            .with_context(|| i18n::err_mods_json_no_array())?;
         let before_enabled = count_enabled_mods(mods);
 
         let mut found = false;
@@ -107,17 +105,10 @@ fn enable_dev_mod(cfg: &Config, selected: &SelectedMod, dev_dir: &Path) -> Resul
     };
     data["mod_load_in_progress"] = Value::Bool(false);
     if after_enabled < before_enabled {
-        anyhow::bail!(
-            "refusing to write mods.json: enabled mod count would drop from {} to {}",
-            before_enabled,
-            after_enabled
-        );
+        anyhow::bail!("{}", i18n::err_mods_json_would_drop(before_enabled, after_enabled));
     }
     if after_enabled <= 1 {
-        println!(
-            "⚠️  mods.json currently has only {} enabled mod(s). If this save depends on other mods, restore them in the ONI Mods menu before loading the save.",
-            after_enabled
-        );
+        println!("⚠️  {}", i18n::warn_few_enabled_mods(after_enabled));
     }
 
     let formatted = serde_json::to_string_pretty(&data)?;
@@ -129,15 +120,12 @@ fn enable_dev_mod(cfg: &Config, selected: &SelectedMod, dev_dir: &Path) -> Resul
             .unwrap_or(0)
     ));
     fs::write(&backup, &content)
-        .with_context(|| format!("备份 mods.json 失败：{}", backup.display()))?;
+        .with_context(|| i18n::err_mods_json_backup(backup.display().to_string()))?;
     fs::write(&mods_file, format!("{}\n", formatted))
-        .with_context(|| format!("写入 mods.json 失败：{}", mods_file.display()))?;
+        .with_context(|| i18n::err_mods_json_write(mods_file.display().to_string()))?;
     println!(
-        "✅ 已在 mods.json 启用 Dev mod：{}（启用数 {} -> {}，备份：{}）",
-        static_id,
-        before_enabled,
-        after_enabled,
-        backup.display()
+        "✅ {}",
+        i18n::dev_enabled_in_mods_json(static_id, before_enabled, after_enabled, backup.display().to_string())
     );
     Ok(())
 }
