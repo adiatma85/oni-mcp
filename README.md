@@ -79,6 +79,7 @@ onim dev -m MyMod
 
 ## Quick Links
 
+- MCP client setup (connect any MCP CLI, make duplicants act): [docs/mcp-client-setup.md](docs/mcp-client-setup.md)
 - English ONI MCP docs: [mods/OniMcp/README_EN.md](mods/OniMcp/README_EN.md)
 - Chinese ONI MCP docs: [mods/OniMcp/README.md](mods/OniMcp/README.md)
 - ONI MCP server changelog: [mods/OniMcp/CHANGELOG.md](mods/OniMcp/CHANGELOG.md)
