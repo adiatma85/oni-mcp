@@ -45,12 +45,42 @@ namespace OniMcp.Tools
             var entries = new List<StrategyEntry>();
             entries.AddRange(MechanicsEntries());
             entries.AddRange(OxygenEntries());
+            entries.AddRange(SurvivalEntries());
             return entries;
         }
 
         internal static List<StrategyEntry> AllEntries()
         {
             return AllEntriesCache;
+        }
+
+        /// <summary>
+        /// Minimum score for an entry to be cited as supporting reasoning.
+        /// A bare category hit is worth 40, so anything below that is an incidental token match.
+        /// Without this floor the advisor attached a 4-point match to a 108-point one and
+        /// presented both as the reason behind a recommendation.
+        /// </summary>
+        internal const int SupportingKnowledgeMinScore = 40;
+
+        /// <summary>
+        /// Scored lookup for other tools that want to cite curated reasoning,
+        /// e.g. the colony advisor joining a fired rule to the knowledge behind it.
+        /// Pass minScore to drop weak matches; explicit user queries should keep it at 0 and let
+        /// the visible score speak, but anything presented as authoritative should filter.
+        /// </summary>
+        internal static List<StrategyEntry> Lookup(string query, string category, int limit, int minScore)
+        {
+            string normalizedQuery = Normalize(query);
+            string normalizedCategory = Normalize(category);
+            return AllEntries()
+                .Where(entry => string.IsNullOrEmpty(normalizedCategory) || Normalize(entry.Category) == normalizedCategory)
+                .Select(entry => new { Entry = entry, Score = Score(entry, normalizedQuery) })
+                .Where(item => string.IsNullOrEmpty(normalizedQuery) || item.Score > Math.Max(0, minScore))
+                .OrderByDescending(item => item.Score)
+                .ThenBy(item => item.Entry.Id)
+                .Take(Math.Max(1, limit))
+                .Select(item => item.Entry)
+                .ToList();
         }
 
         private static StrategyEntry Entry(
