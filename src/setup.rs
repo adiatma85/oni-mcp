@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const CONFIG_FILE: &str = "onim.toml";
@@ -74,6 +74,31 @@ fn auto_detect() -> Option<PathBuf> {
     }
 
     None
+}
+
+/// Number of mods in an existing, parseable `onim.toml`.
+/// None when the file is absent, unparseable, or declares no mods, i.e. when writing the
+/// default template would not destroy anything the user cares about.
+fn existing_mod_count(path: &Path) -> Option<usize> {
+    let content = fs::read_to_string(path).ok()?;
+    let config: crate::config::Config = toml::from_str(&content).ok()?;
+    if config.mods.is_empty() {
+        None
+    } else {
+        Some(config.mods.len())
+    }
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| CONFIG_FILE.to_string());
+    path.with_file_name(format!("{}.onim-backup-{}", name, stamp))
 }
 
 fn validate_game_path(path: &PathBuf) -> Result<Vec<String>> {
@@ -212,8 +237,26 @@ default_mod = "OniModTemplate"
 path = "mods/OniModTemplate"
 "#;
 
-    println!("\n📝 写入 {} ...", CONFIG_FILE);
-    fs::write(&config_path, toml_content).with_context(|| format!("写入 {} 失败", CONFIG_FILE))?;
+    // setup 负责游戏路径和依赖，Mod 列表由用户维护。
+    // 这里以前无条件覆盖 onim.toml，会抹掉已有的 [mods.*]、default_mod 和
+    // publishedfileid（Steam 创意工坊 ID 丢失后只能手动找回），所以先保留已有配置。
+    println!();
+    match existing_mod_count(&config_path) {
+        Some(count) => {
+            println!("↩️  保留现有 {}（{} 个 Mod 配置未改动）", CONFIG_FILE, count);
+        }
+        None => {
+            if config_path.exists() {
+                let backup = backup_path(&config_path);
+                fs::copy(&config_path, &backup)
+                    .with_context(|| format!("备份 {} 失败", CONFIG_FILE))?;
+                println!("⚠️  现有 {} 无法解析或不含 Mod，已备份到 {}", CONFIG_FILE, backup.display());
+            }
+            println!("📝 写入 {} ...", CONFIG_FILE);
+            fs::write(&config_path, toml_content)
+                .with_context(|| format!("写入 {} 失败", CONFIG_FILE))?;
+        }
+    }
 
     // 4. 写入 Directory.Build.props
     // Managed 目录按平台实际布局解析后写成绝对路径：
