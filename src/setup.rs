@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
@@ -106,15 +107,15 @@ fn validate_game_path(path: &PathBuf) -> Result<Vec<String>> {
     let managed = crate::config::managed_path_for_game(path);
 
     let required = [
-        ("Assembly-CSharp.dll", "游戏主逻辑 DLL"),
-        ("0Harmony.dll", "Harmony 补丁框架"),
-        ("UnityEngine.CoreModule.dll", "Unity 引擎核心"),
+        ("Assembly-CSharp.dll", i18n::desc_game_dll()),
+        ("0Harmony.dll", i18n::desc_harmony()),
+        ("UnityEngine.CoreModule.dll", i18n::desc_unity_core()),
     ];
 
     for (file, desc) in &required {
         let p = managed.join(file);
         if !p.exists() {
-            errors.push(format!("缺少 {} ({}) 在 {}", file, desc, p.display()));
+            errors.push(i18n::missing_required_file(file, desc, &p.display().to_string()));
         }
     }
 
@@ -122,10 +123,10 @@ fn validate_game_path(path: &PathBuf) -> Result<Vec<String>> {
 }
 
 pub fn run() -> Result<()> {
-    println!("🛠️  onim 项目初始化\n");
+    println!("🛠️  {}\n", i18n::setup_title());
 
     // 检查依赖
-    println!("📋 检查依赖...");
+    println!("📋 {}", i18n::checking_deps());
     let mut missing = vec![];
 
     if !check_command("dotnet") {
@@ -142,20 +143,20 @@ pub fn run() -> Result<()> {
     }
 
     if !missing.is_empty() {
-        println!("⚠️  缺少必要工具：");
+        println!("⚠️  {}", i18n::deps_missing_header());
         for m in &missing {
             println!("   ❌ {}", m);
         }
         println!();
-        println!("请安装后重试：");
+        println!("{}", i18n::install_and_retry());
         println!("  .NET SDK: https://dotnet.microsoft.com/download");
         #[cfg(not(target_os = "windows"))]
         {
-            println!("  unzip: sudo apt install unzip  (或对应包管理器)");
+            println!("{}", i18n::unzip_hint());
         }
-        anyhow::bail!("缺少依赖");
+        anyhow::bail!("{}", i18n::err_missing_deps());
     }
-    println!("✅ 所有依赖已安装\n");
+    println!("✅ {}\n", i18n::deps_ok());
 
     let cwd = env::current_dir()?;
     let config_path = cwd.join(CONFIG_FILE);
@@ -180,8 +181,8 @@ pub fn run() -> Result<()> {
     }
 
     if let Some(ref path) = game_path {
-        println!("检测到现有游戏路径：{}", path.display());
-        let answer = prompt("路径是否正确？ [Y/n] ", Some("Y"))?;
+        println!("{}", i18n::found_existing_path(path.display().to_string()));
+        let answer = prompt(i18n::path_correct_prompt(), Some("Y"))?;
         if answer.eq_ignore_ascii_case("n") {
             game_path = None;
         }
@@ -189,8 +190,8 @@ pub fn run() -> Result<()> {
 
     if game_path.is_none() {
         if let Some(detected) = auto_detect() {
-            println!("\n自动检测到游戏路径：{}", detected.display());
-            let answer = prompt("使用此路径？ [Y/n] ", Some("Y"))?;
+            println!("\n{}", i18n::auto_detected_path(detected.display().to_string()));
+            let answer = prompt(i18n::use_this_path_prompt(), Some("Y"))?;
             if answer.eq_ignore_ascii_case("n") {
                 game_path = None;
             } else {
@@ -200,10 +201,10 @@ pub fn run() -> Result<()> {
     }
 
     if game_path.is_none() {
-        println!("\n请输入缺氧游戏安装目录（包含 OxygenNotIncluded 可执行文件的那一层）：");
+        println!("\n{}", i18n::enter_game_dir());
         let input = prompt("> ", None)?;
         if input.is_empty() {
-            anyhow::bail!("未提供游戏路径，初始化取消");
+            anyhow::bail!("{}", i18n::err_no_game_path());
         }
         game_path = Some(PathBuf::from(input));
     }
@@ -211,31 +212,28 @@ pub fn run() -> Result<()> {
     let game_path = game_path.unwrap();
 
     // 2. 验证
-    println!("\n🔍 验证游戏文件...");
+    println!("\n🔍 {}", i18n::verifying_game_files());
     let errors = validate_game_path(&game_path)?;
     if !errors.is_empty() {
-        println!("⚠️  发现问题：");
+        println!("⚠️  {}", i18n::problems_found());
         for e in &errors {
             println!("   - {}", e);
         }
-        let answer = prompt("文件验证未通过，是否仍继续？ [y/N] ", Some("N"))?;
+        let answer = prompt(i18n::verify_failed_continue(), Some("N"))?;
         if !answer.eq_ignore_ascii_case("y") {
-            anyhow::bail!("初始化已取消");
+            anyhow::bail!("{}", i18n::err_setup_cancelled());
         }
     } else {
-        println!("✅ 所有关键文件验证通过");
+        println!("✅ {}", i18n::all_files_verified());
     }
 
     // 3. 写入 onim.toml（只包含 Mod 列表，游戏路径在 Directory.Build.props 中）
-    let toml_content = r#"# onim 配置文件
-# 游戏路径在 Directory.Build.props 中统一管理
-
-# 默认 Mod（不指定 -m 时使用）
-default_mod = "OniModTemplate"
-
-[mods.OniModTemplate]
-path = "mods/OniModTemplate"
-"#;
+    let toml_content = format!(
+        "{header}\n{game_path_note}\n\n{default_mod_note}\ndefault_mod = \"OniModTemplate\"\n\n[mods.OniModTemplate]\npath = \"mods/OniModTemplate\"\n",
+        header = i18n::toml_header(),
+        game_path_note = i18n::toml_game_path_note(),
+        default_mod_note = i18n::toml_default_mod_note()
+    );
 
     // setup 负责游戏路径和依赖，Mod 列表由用户维护。
     // 这里以前无条件覆盖 onim.toml，会抹掉已有的 [mods.*]、default_mod 和
@@ -243,18 +241,18 @@ path = "mods/OniModTemplate"
     println!();
     match existing_mod_count(&config_path) {
         Some(count) => {
-            println!("↩️  保留现有 {}（{} 个 Mod 配置未改动）", CONFIG_FILE, count);
+            println!("↩️  {}", i18n::kept_existing_config(CONFIG_FILE, count));
         }
         None => {
             if config_path.exists() {
                 let backup = backup_path(&config_path);
                 fs::copy(&config_path, &backup)
-                    .with_context(|| format!("备份 {} 失败", CONFIG_FILE))?;
-                println!("⚠️  现有 {} 无法解析或不含 Mod，已备份到 {}", CONFIG_FILE, backup.display());
+                    .with_context(|| i18n::err_backup_failed(CONFIG_FILE))?;
+                println!("⚠️  {}", i18n::config_unparseable_backed_up(CONFIG_FILE, backup.display().to_string()));
             }
-            println!("📝 写入 {} ...", CONFIG_FILE);
-            fs::write(&config_path, toml_content)
-                .with_context(|| format!("写入 {} 失败", CONFIG_FILE))?;
+            println!("📝 {}", i18n::writing_file(CONFIG_FILE));
+            fs::write(&config_path, &toml_content)
+                .with_context(|| i18n::err_write_failed(CONFIG_FILE))?;
         }
     }
 
@@ -266,7 +264,7 @@ path = "mods/OniModTemplate"
     let props_content = format!(
         r#"<Project>
 
-  <!-- onim 自动生成的全局配置 -->
+  <!-- Generated by onim setup -->
 
   <PropertyGroup>
     <OniGamePath>{}</OniGamePath>
@@ -277,26 +275,27 @@ path = "mods/OniModTemplate"
   </PropertyGroup>
 
   <Target Name="ValidateOniGamePath" BeforeTargets="BeforeBuild">
-    <Error Text="游戏路径未配置！" Condition="'$(OniGamePath)' == ''" />
+    <Error Text="{game_path_unset}" Condition="'$(OniGamePath)' == ''" />
   </Target>
 
 </Project>
 "#,
         game_path.to_string_lossy().replace('"', "&quot;"),
-        managed_path.to_string_lossy().replace('"', "&quot;")
+        managed_path.to_string_lossy().replace('"', "&quot;"),
+        game_path_unset = i18n::err_game_path_unset()
     );
 
-    println!("📝 写入 {} ...", BUILD_PROPS);
-    fs::write(&props_path, props_content).with_context(|| format!("写入 {} 失败", BUILD_PROPS))?;
+    println!("📝 {}", i18n::writing_file(BUILD_PROPS));
+    fs::write(&props_path, props_content).with_context(|| i18n::err_write_failed(BUILD_PROPS))?;
 
-    println!("\n✅ 初始化完成！");
-    println!("   游戏路径：{}", game_path.display());
-    println!("   配置文件：{}", config_path.display());
-    println!("   MSBuild 配置：{}", props_path.display());
+    println!("\n✅ {}", i18n::setup_done());
+    println!("{}", i18n::out_game_path(game_path.display().to_string()));
+    println!("{}", i18n::out_config_path(config_path.display().to_string()));
+    println!("{}", i18n::out_props_path(props_path.display().to_string()));
     println!();
-    println!("下一步：");
-    println!("  onim build       构建默认 Mod");
-    println!("  onim init <name> 创建新 Mod");
+    println!("{}", i18n::next_steps());
+    println!("{}", i18n::next_build());
+    println!("{}", i18n::next_init());
 
     Ok(())
 }

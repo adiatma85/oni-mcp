@@ -2,6 +2,9 @@ use anyhow::{Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+#[macro_use]
+mod i18n;
+
 mod archive;
 mod build;
 mod config;
@@ -16,75 +19,75 @@ mod uninstall;
 
 #[derive(Parser)]
 #[command(name = "onim")]
-#[command(about = "缺氧 (Oxygen Not Included) Mod 开发 CLI 工具")]
+#[command(about = "Oxygen Not Included mod development CLI")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// 指定配置文件路径
+    /// Path to the config file
     #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 
-    /// 指定要操作的 Mod（不指定则使用默认/第一个 Mod）
+    /// Mod to operate on (defaults to the configured default, or the first one)
     #[arg(short, long, global = true)]
     r#mod: Option<String>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// 初始化项目配置（检测游戏路径、写入配置文件）
+    /// Initialise project config (detect the game path, write config files)
     Setup,
-    /// 从模板创建新 Mod
+    /// Create a new mod from the template
     Init {
-        /// Mod 名称（英文，无空格）
+        /// Mod name (ASCII, no spaces)
         name: String,
-        /// 作者名
+        /// Author name
         #[arg(short, long)]
         author: Option<String>,
-        /// Mod 描述
+        /// Mod description
         #[arg(short, long)]
         desc: Option<String>,
-        /// Mod 版本号
+        /// Mod version
         #[arg(long, default_value = "0.1.7")]
         mod_version: String,
     },
-    /// 构建 Mod（默认 Debug，加 --release 为 Release）
+    /// Build a mod (Debug by default; --release for Release)
     Build {
         #[arg(short, long)]
         release: bool,
-        /// 构建全部已配置 Mod
+        /// Build every configured mod
         #[arg(long)]
         all: bool,
     },
-    /// 开发模式：构建并安装到游戏 Dev 目录
+    /// Dev mode: build and install into the game's Dev folder
     Dev {
-        /// 开发模式构建并安装全部已配置 Mod
+        /// Build and install every configured mod in dev mode
         #[arg(long)]
         all: bool,
     },
-    /// 正式安装到游戏 Local 目录
+    /// Release install into the game's Local folder
     Install,
-    /// 从游戏目录卸载 Mod
+    /// Uninstall a mod from the game folder
     Uninstall {
-        /// 卸载范围
+        /// Uninstall scope
         #[arg(short, long, value_enum, default_value_t = UninstallScope::All)]
         scope: UninstallScope,
     },
-    /// 查看已安装的 Mod 信息
+    /// Show installed mod information
     Info,
-    /// 发布到 Steam 创意工坊
+    /// Publish to the Steam Workshop
     Publish {
-        /// 强制使用 OniUploader GUI（不用 SteamCMD）
+        /// Force the OniUploader GUI instead of SteamCMD
         #[arg(long)]
         gui: bool,
-        /// 自动使用最新更新日志作为上传说明，不弹更新说明输入
+        /// Use the latest changelog entry as the upload note, without prompting
         #[arg(long)]
         auto_note: bool,
     },
-    /// 列出所有配置的 Mod
+    /// List every configured mod
     List,
-    /// 检查本机 ONI Mod 开发环境
+    /// Check the local ONI mod development environment
     Doctor,
 }
 
@@ -98,7 +101,7 @@ pub enum UninstallScope {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Setup、Init 和 Doctor 不需要严格加载配置。
+    // Setup, Init and Doctor do not need a strictly loaded config.
     match &cli.command {
         Commands::Setup => return setup::run(),
         Commands::Init {
@@ -125,7 +128,7 @@ fn main() -> Result<()> {
         Commands::Build { release, all } => {
             if all {
                 if cli.r#mod.is_some() {
-                    bail!("--all 与 -m/--mod 不可同时使用");
+                    bail!("{}", i18n::err_all_and_mod_conflict());
                 }
                 for selected in cfg.select_all_mods()? {
                     build::run(&cfg, &selected, release)?;
@@ -139,7 +142,7 @@ fn main() -> Result<()> {
         Commands::Dev { all } => {
             if all {
                 if cli.r#mod.is_some() {
-                    bail!("--all 与 -m/--mod 不可同时使用");
+                    bail!("{}", i18n::err_all_and_mod_conflict());
                 }
                 for selected in cfg.select_all_mods()? {
                     dev::run(&cfg, &selected)?;
@@ -164,11 +167,11 @@ fn main() -> Result<()> {
             publish::run(&cfg, &selected, gui, auto_note)
         }
         Commands::List => {
-            println!("已配置的 Mod：");
+            println!("{}", i18n::configured_mods());
             let default = cfg.default_mod.clone();
             for (name, m) in &cfg.mods {
                 let marker = if Some(name.to_string()) == default {
-                    " ← 默认"
+                    i18n::default_marker()
                 } else {
                     ""
                 };

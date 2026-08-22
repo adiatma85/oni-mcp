@@ -198,6 +198,21 @@ cp Directory.Build.props.example Directory.Build.props
 | `onim publish` | publish to Steam Workshop |
 | `onim list` | list known mods in config |
 
+## CLI Language
+
+`onim` speaks English by default and Chinese on request. Resolution order:
+
+1. `ONIM_LANG=en` / `ONIM_LANG=zh` — explicit override
+2. `lang = "zh"` at the top of `onim.toml` — per-project preference
+3. `LC_ALL` / `LC_MESSAGES` / `LANG` — any `zh*` locale selects Chinese
+4. English
+
+```bash
+ONIM_LANG=zh onim doctor    # Chinese for one command
+```
+
+`--help` text is English only: clap builds it at compile time, so it cannot switch at runtime.
+
 ## Development & Runtime Notes
 
 - Use semantic tasks and explicit short descriptions for all MCP calls.
