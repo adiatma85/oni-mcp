@@ -46,6 +46,11 @@ namespace OniMcp.Tools
             entries.AddRange(MechanicsEntries());
             entries.AddRange(OxygenEntries());
             entries.AddRange(SurvivalEntries());
+            entries.AddRange(BiomeEntries());
+            entries.AddRange(ResearchEntries());
+            entries.AddRange(GermEntries());
+            entries.AddRange(ThermalEntries());
+            entries.AddRange(FoodEntries());
             return entries;
         }
 
