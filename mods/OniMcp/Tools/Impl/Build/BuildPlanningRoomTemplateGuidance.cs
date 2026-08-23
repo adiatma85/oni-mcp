@@ -372,44 +372,141 @@ namespace OniMcp.Tools
             if (string.IsNullOrWhiteSpace(text))
                 return diagnostic;
 
-            string haystack = text;
+            JObject obj = null;
             try
             {
-                JObject obj = JObject.Parse(text);
-                foreach (string key in new[] { "error", "reason", "message", "summary", "failedReason", "status" })
-                {
-                    string value = obj[key]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                        haystack += "\n" + value;
-                }
+                obj = JObject.Parse(text);
             }
             catch
             {
             }
 
-            string lower = haystack.ToLowerInvariant();
+            // Structured signals are authoritative; keywords are a guess. The previous version
+            // searched the whole serialized payload, which always contains an "obstructions"
+            // key, so every failure came back "obstructed" -- research locks included.
             string category = null;
-            if (ContainsAny(lower, "obstruct", "blocked", "occupied", "阻挡", "堵塞", "占用", "被占", "挡住"))
-                category = "obstructed";
-            else if (ContainsAny(lower, "material", "resource", "材料", "资源", "原料", "缺少"))
-                category = "missing_material";
-            else if (ContainsAny(lower, "support", "foundation", "支撑", "地基", "依托"))
-                category = "missing_support";
-            else if (ContainsAny(lower, "reach", "access", "不可达", "无法到达", "够不到", "路径"))
-                category = "unreachable";
-            else if (ContainsAny(lower, "confirm", "确认", "confirm=true"))
-                category = "missing_confirm";
+            if (obj != null)
+            {
+                if (FindBoolean(obj, "unlocked") == false)
+                    category = "research_locked";
+                else if (FindNonEmptyArray(obj, "obstructions"))
+                    category = "obstructed";
+                else if (FindBoolean(obj, "satisfied") == false)
+                    category = "missing_material";
+            }
+
+            if (category == null)
+            {
+                // Fall back to keywords over message VALUES only, never field names.
+                string lower = CollectMessageText(obj, text).ToLowerInvariant();
+                if (ContainsAny(lower, "not researched", "tech locked", "未解锁", "未研究"))
+                    category = "research_locked";
+                else if (ContainsAny(lower, "obstruct", "blocked", "occupied", "阻挡", "堵塞", "占用", "被占", "挡住"))
+                    category = "obstructed";
+                else if (ContainsAny(lower, "material", "resource", "材料", "资源", "原料", "缺少"))
+                    category = "missing_material";
+                else if (ContainsAny(lower, "support", "foundation", "支撑", "地基", "依托"))
+                    category = "missing_support";
+                else if (ContainsAny(lower, "reach", "access", "不可达", "无法到达", "够不到", "路径"))
+                    category = "unreachable";
+                else if (ContainsAny(lower, "confirm", "确认", "confirm=true"))
+                    category = "missing_confirm";
+            }
 
             if (!string.IsNullOrEmpty(category))
             {
                 diagnostic["category"] = category;
                 diagnostic["nextRead"] = category == "unreachable"
                     ? "/active/dupes/reachability.md"
-                    : "/active/map/cell_X_Y.md";
-                diagnostic["hint"] = "Use verificationPlan or nextActions before broad map reads.";
+                    : category == "research_locked"
+                        ? "colony_control domain=management kind=research action=list"
+                        : "/active/map/cell_X_Y.md";
+                diagnostic["hint"] = category == "research_locked"
+                    ? "The building is not researched yet. Check techGate.lockedPrefabs; no amount of digging will help."
+                    : "Use verificationPlan or nextActions before broad map reads.";
             }
 
             return diagnostic;
+        }
+
+        /// <summary>First value of a boolean property with this name, searched recursively.</summary>
+        private static bool? FindBoolean(JToken token, string name)
+        {
+            JObject obj = token as JObject;
+            if (obj != null)
+            {
+                foreach (var property in obj.Properties())
+                {
+                    if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)
+                        && property.Value != null && property.Value.Type == JTokenType.Boolean)
+                        return property.Value.Value<bool>();
+                    bool? nested = FindBoolean(property.Value, name);
+                    if (nested.HasValue)
+                        return nested;
+                }
+                return null;
+            }
+
+            JArray array = token as JArray;
+            if (array != null)
+            {
+                foreach (JToken item in array)
+                {
+                    bool? nested = FindBoolean(item, name);
+                    if (nested.HasValue)
+                        return nested;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>True when a property with this name holds a non-empty array anywhere in the payload.</summary>
+        private static bool FindNonEmptyArray(JToken token, string name)
+        {
+            JObject obj = token as JObject;
+            if (obj != null)
+            {
+                foreach (var property in obj.Properties())
+                {
+                    JArray candidate = property.Value as JArray;
+                    if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)
+                        && candidate != null && candidate.Count > 0)
+                        return true;
+                    if (FindNonEmptyArray(property.Value, name))
+                        return true;
+                }
+                return false;
+            }
+
+            JArray array = token as JArray;
+            if (array != null)
+            {
+                foreach (JToken item in array)
+                {
+                    if (FindNonEmptyArray(item, name))
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Human-readable message values only. Keeps field names out of keyword matching,
+        /// which is what made every failure look obstructed.
+        /// </summary>
+        private static string CollectMessageText(JObject obj, string fallback)
+        {
+            if (obj == null)
+                return fallback ?? string.Empty;
+
+            var parts = new List<string>();
+            foreach (string key in new[] { "error", "reason", "message", "summary", "failedReason", "next", "suggestion" })
+            {
+                string value = obj[key]?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    parts.Add(value);
+            }
+            return parts.Count > 0 ? string.Join("\n", parts.ToArray()) : string.Empty;
         }
 
         private static bool ContainsAny(string text, params string[] needles)

@@ -79,6 +79,7 @@ onim dev -m MyMod
 
 ## Quick Links
 
+- MCP client setup (connect any MCP CLI, make duplicants act): [docs/mcp-client-setup.md](docs/mcp-client-setup.md)
 - English ONI MCP docs: [mods/OniMcp/README_EN.md](mods/OniMcp/README_EN.md)
 - Chinese ONI MCP docs: [mods/OniMcp/README.md](mods/OniMcp/README.md)
 - ONI MCP server changelog: [mods/OniMcp/CHANGELOG.md](mods/OniMcp/CHANGELOG.md)
@@ -197,6 +198,21 @@ cp Directory.Build.props.example Directory.Build.props
 | `onim info` | show installed Dev/Local/Steam modules |
 | `onim publish` | publish to Steam Workshop |
 | `onim list` | list known mods in config |
+
+## CLI Language
+
+`onim` speaks English by default and Chinese on request. Resolution order:
+
+1. `ONIM_LANG=en` / `ONIM_LANG=zh` — explicit override
+2. `lang = "zh"` at the top of `onim.toml` — per-project preference
+3. `LC_ALL` / `LC_MESSAGES` / `LANG` — any `zh*` locale selects Chinese
+4. English
+
+```bash
+ONIM_LANG=zh onim doctor    # Chinese for one command
+```
+
+`--help` text is English only: clap builds it at compile time, so it cannot switch at runtime.
 
 ## Development & Runtime Notes
 

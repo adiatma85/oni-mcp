@@ -91,6 +91,14 @@ namespace OniMcp.Tools
                                     },
                 new McpResourceTemplateInfo
                                     {
+                                        UriTemplate = "oni://strategy/query{?query,category,dlc,detail,limit}",
+                                        Name = "server_control",
+                                        Title = "攻略知识库查询",
+                                        Description = "通过 server_control domain=strategy action=query 检索静态缺氧攻略知识库：机制、公式、建造顺序判断和生态区提示。支持中英文关键词；dlc=base/spaced_out 过滤版本；derive 字段列出应当从当前存档实时读取而不是照抄的数值。",
+                                        MimeType = "application/json"
+                                    },
+                new McpResourceTemplateInfo
+                                    {
                                         UriTemplate = "oni://tools/guide{?goal,detail}",
                                         Name = "server_control",
                                         Title = "工具意图指南",

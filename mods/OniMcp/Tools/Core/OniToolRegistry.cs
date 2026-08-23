@@ -193,6 +193,25 @@ namespace OniMcp.Tools
             return CallToolCore(name, arguments, false);
         }
 
+        /// <summary>
+        /// Dispatch for oni:// resource reads.
+        /// Most resources are backed by internalized aggregates (colony_control, read_control,
+        /// dupes_control, search_control) which live in _internalOperations rather than _tools,
+        /// so a plain CallTool lookup fails with "Tool not found".
+        /// Coordinates are permitted because a resource URI is an explicit, client-authored
+        /// request and several resource templates advertise x/y parameters; resources are
+        /// read-only by construction.
+        /// </summary>
+        internal static CallToolResult CallToolFromResource(string name, JObject arguments)
+        {
+            if (_tools.ContainsKey(name) || _aliases.ContainsKey(name))
+                return CallToolCore(name, arguments, true);
+            McpTool operation;
+            if (!_internalOperations.TryGetValue(name, out operation))
+                return CallToolResult.Error($"Tool not found: {name}");
+            return CallOperationCore(operation, arguments, true);
+        }
+
         internal static CallToolResult CallToolFromWorldEditor(string name, JObject arguments, bool allowValidatedCoordinates)
         {
             if (_tools.ContainsKey(name) || _aliases.ContainsKey(name))
