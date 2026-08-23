@@ -134,8 +134,12 @@ namespace OniMcp.Tools
                         case "rockets":
                         case "rocket_system":
                             return ForwardRocket(args);
+                        case "farming":
+                        case "plants":
+                        case "farm":
+                            return Forward(args, FarmingTools.ControlPlanting());
                         default:
-                    return CallToolResult.Error("domain must be planning, config, production, storage, filter, tile_selection, receptacle, side_surface, space_building, space_story, special, story_facility, or rocket");
+                    return CallToolResult.Error("domain must be planning, config, production, storage, filter, tile_selection, receptacle, side_surface, space_building, space_story, special, story_facility, rocket, or farming");
                     }
                 }
             };

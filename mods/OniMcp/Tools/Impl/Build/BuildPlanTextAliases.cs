@@ -112,7 +112,7 @@ namespace OniMcp.Tools
             };
         }
 
-        private static Dictionary<string, string> PlanBuildingAliases()
+        internal static Dictionary<string, string> PlanBuildingAliases()
         {
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -136,7 +136,35 @@ namespace OniMcp.Tools
                 ["门"] = "ManualPressureDoor",
                 ["床"] = "Bed",
                 ["厕所"] = "Outhouse",
+                ["户外厕所"] = "Outhouse",
+                ["抽水马桶"] = "FlushToilet",
+                ["冲水马桶"] = "FlushToilet",
+                ["马桶"] = "FlushToilet",
+                ["flushtoilet"] = "FlushToilet",
+                ["flush toilet"] = "FlushToilet",
                 ["洗手盆"] = "WashBasin",
+                ["洗手台"] = "WashBasin",
+                ["washbasin"] = "WashBasin",
+                ["wash basin"] = "WashBasin",
+                ["basin"] = "WashBasin",
+                ["洗手池"] = "WashSink",
+                ["水槽"] = "WashSink",
+                ["水池"] = "WashSink",
+                ["washsink"] = "WashSink",
+                ["wash sink"] = "WashSink",
+                ["sink"] = "WashSink",
+                ["种植箱"] = "PlanterBox",
+                ["花盆"] = "PlanterBox",
+                ["planterbox"] = "PlanterBox",
+                ["planter box"] = "PlanterBox",
+                ["土培砖"] = "FarmTile",
+                ["农砖"] = "FarmTile",
+                ["farmtile"] = "FarmTile",
+                ["farm tile"] = "FarmTile",
+                ["液培砖"] = "HydroponicFarm",
+                ["水培砖"] = "HydroponicFarm",
+                ["hydroponicfarm"] = "HydroponicFarm",
+                ["hydroponic farm"] = "HydroponicFarm",
                 ["储存箱"] = "StorageLocker",
                 ["存储箱"] = "StorageLocker",
                 ["藻类制氧机"] = "MineralDeoxidizer",

@@ -46,9 +46,9 @@ namespace OniMcp.Tools
                     if (overlay == null)
                         return CallToolResult.Error("OverlayScreen not available");
 
-                    string requestedView = args["view"]?.ToString();
+                    string requestedView = (args["overlay"] ?? args["view"] ?? args["mode"])?.ToString();
                     if (string.IsNullOrEmpty(requestedView))
-                        return CallToolResult.Error("view is required");
+                        return CallToolResult.Error("overlay or view is required");
 
                     if (!TryResolveOverlayView(requestedView, out var viewName, out var mode))
                     {

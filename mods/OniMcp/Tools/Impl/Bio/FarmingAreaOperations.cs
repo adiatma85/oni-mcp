@@ -53,15 +53,14 @@ namespace OniMcp.Tools
 
                     Tag seedTag = Tag.Invalid;
                     GameObject seedPrefab = null;
+                    PlantableSeed seedComponent = null;
                     if (isSet)
                     {
-                        string seedName = args["seedTag"]?.ToString();
+                        string seedName = (args["seedTag"] ?? args["seed"] ?? args["crop"] ?? args["plant"] ?? args["entityTag"])?.ToString();
                         if (string.IsNullOrWhiteSpace(seedName))
                             return CallToolResult.Error("seedTag is required for action=set");
-                        seedTag = TagManager.Create(seedName.Trim());
-                        seedPrefab = Assets.GetPrefab(seedTag);
-                        if (seedPrefab == null || seedPrefab.GetComponent<PlantableSeed>() == null)
-                            return CallToolResult.Error("seedTag is not a PlantableSeed prefab");
+                        if (!TryResolveSeedTag(seedName, out seedTag, out seedPrefab, out seedComponent))
+                            return CallToolResult.Error("seedTag '" + seedName + "' could not be resolved to a valid PlantableSeed prefab. Use action=seed_catalog to view available seeds.");
                     }
 
                     var mutationTag = string.IsNullOrWhiteSpace(args["mutationTag"]?.ToString())
@@ -260,6 +259,58 @@ namespace OniMcp.Tools
                         ["rect"] = rect,
                         ["targets"] = results.Take(200).ToList(),
                         ["truncatedTargets"] = Math.Max(0, results.Count - 200)
+                    }, McpJsonUtil.Settings));
+                }
+            };
+        }
+
+        public static McpTool SetAutoHarvestArea()
+        {
+            return new McpTool
+            {
+                Name = "farming_autoharvest_area",
+                Group = "farming",
+                Mode = "execute",
+                Risk = "medium",
+                Hidden = true,
+                Aliases = new List<string> { "plants_set_autoharvest", "farming_toggle_autoharvest" },
+                Description = "按区域或目标批量设置/切换农作物的自动收获策略 (autoHarvest / HarvestWhenReady)",
+                Parameters = RectParams(new Dictionary<string, McpToolParameter>
+                {
+                    ["autoHarvest"] = new McpToolParameter { Type = "boolean", Description = "是否开启自动收获，默认 true", Required = false },
+                    ["harvestWhenReady"] = new McpToolParameter { Type = "boolean", Description = "autoHarvest 的别名", Required = false },
+                    ["query"] = new McpToolParameter { Type = "string", Description = "按植物名称或 prefabId 筛选", Required = false },
+                    ["confirm"] = new McpToolParameter { Type = "boolean", Description = "区域较大时建议传 true", Required = false }
+                }),
+                Handler = args =>
+                {
+                    bool enable = ToolUtil.GetBool(args, "autoHarvest", ToolUtil.GetBool(args, "harvestWhenReady", true));
+                    int worldId = ToolUtil.ResolveWorldId(args);
+                    string query = args["query"]?.ToString();
+                    var rect = HasRectInput(args) ? ToolUtil.GetRect(args) : null;
+                    int changed = 0;
+                    var results = new List<Dictionary<string, object>>();
+
+                    foreach (var h in Components.HarvestDesignatables.Items)
+                    {
+                        if (h == null || h.gameObject == null) continue;
+                        if (!ToolUtil.GameObjectMatchesWorld(h.gameObject, worldId)) continue;
+                        if (rect != null && !CellInRect(Grid.PosToCell(h.gameObject), rect, worldId)) continue;
+                        if (!HarvestableMatches(h, query)) continue;
+
+                        h.SetHarvestWhenReady(enable);
+                        changed++;
+                        results.Add(HarvestableInfo(h));
+                    }
+
+                    return CallToolResult.Text(JsonConvert.SerializeObject(new Dictionary<string, object>
+                    {
+                        ["action"] = enable ? "enable_autoharvest" : "disable_autoharvest",
+                        ["autoHarvest"] = enable,
+                        ["changed"] = changed,
+                        ["worldId"] = worldId,
+                        ["rect"] = rect,
+                        ["harvestables"] = results.Take(100).ToList()
                     }, McpJsonUtil.Settings));
                 }
             };

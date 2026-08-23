@@ -109,6 +109,13 @@ namespace OniMcp.Tools
                     case "auto_connect":
                     case "utility_auto_connect":
                     case "connect":
+                    case "route_conduit":
+                    case "route_pipe":
+                    case "route_wire":
+                    case "route_line":
+                    case "plumb":
+                    case "wire":
+                    case "pipe":
                         return AutoConnectUtility().Handler(forwardArgs);
                     case "repair_line":
                     case "connect_line":

@@ -41,7 +41,100 @@ namespace OniMcp.Tools
             return parameters;
         }
 
-        private static PlantablePlot FindPlot(JObject args)
+        internal static readonly Dictionary<string, string> FriendlySeedAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Mealwood"] = "BasicSingleHarvestPlantSeed",
+            ["MealwoodSeed"] = "BasicSingleHarvestPlantSeed",
+            ["BasicPlant"] = "BasicSingleHarvestPlantSeed",
+            ["BasicPlantSeed"] = "BasicSingleHarvestPlantSeed",
+            ["米虱"] = "BasicSingleHarvestPlantSeed",
+            ["米虱木"] = "BasicSingleHarvestPlantSeed",
+            ["米树"] = "BasicSingleHarvestPlantSeed",
+            ["BristleBlossom"] = "PrickleFlowerSeed",
+            ["BristleBlossomSeed"] = "PrickleFlowerSeed",
+            ["PrickleFlower"] = "PrickleFlowerSeed",
+            ["PrickleFlowerSeed"] = "PrickleFlowerSeed",
+            ["刺花"] = "PrickleFlowerSeed",
+            ["Mushroom"] = "MushroomSeed",
+            ["MushroomSeed"] = "MushroomSeed",
+            ["DuskCap"] = "MushroomSeed",
+            ["夜幕菇"] = "MushroomSeed",
+            ["蘑菇"] = "MushroomSeed",
+            ["Oxyfern"] = "OxyfernSeed",
+            ["OxyfernSeed"] = "OxyfernSeed",
+            ["氧气蕨"] = "OxyfernSeed",
+            ["ThimbleReed"] = "BasicFabricMaterialPlantSeed",
+            ["ThimbleReedSeed"] = "BasicFabricMaterialPlantSeed",
+            ["Reed"] = "BasicFabricMaterialPlantSeed",
+            ["顶针芦苇"] = "BasicFabricMaterialPlantSeed",
+            ["芦苇"] = "BasicFabricMaterialPlantSeed",
+            ["PinchaPepper"] = "SpiceVineSeed",
+            ["PinchaPepperSeed"] = "SpiceVineSeed",
+            ["PepperPlant"] = "SpiceVineSeed",
+            ["火椒"] = "SpiceVineSeed",
+            ["椒藤"] = "SpiceVineSeed",
+            ["ArborTree"] = "ForestTreeSeed",
+            ["ArborTreeSeed"] = "ForestTreeSeed",
+            ["ForestTree"] = "ForestTreeSeed",
+            ["乔木树"] = "ForestTreeSeed",
+            ["BogBucket"] = "SwampHarvestPlantSeed",
+            ["沼泽甜菜"] = "SwampHarvestPlantSeed",
+            ["Waterweed"] = "SeaLettuceSeed",
+            ["海生菜"] = "SeaLettuceSeed",
+            ["SleetWheat"] = "ColdWheatSeed",
+            ["冰霜小麦"] = "ColdWheatSeed",
+            ["NoshSprout"] = "BeanPlantSeed",
+            ["小吃豆"] = "BeanPlantSeed"
+        };
+
+        internal static bool TryResolveSeedTag(string input, out Tag resolvedTag, out GameObject prefab, out PlantableSeed seed)
+        {
+            resolvedTag = Tag.Invalid;
+            prefab = null;
+            seed = null;
+            if (string.IsNullOrWhiteSpace(input))
+                return false;
+
+            string key = input.Trim();
+            if (FriendlySeedAliases.TryGetValue(key, out string canonical))
+                key = canonical;
+
+            var tag = TagManager.Create(key);
+            var testPrefab = Assets.GetPrefab(tag);
+            var testSeed = testPrefab != null ? testPrefab.GetComponent<PlantableSeed>() : null;
+            if (testSeed != null)
+            {
+                resolvedTag = tag;
+                prefab = testPrefab;
+                seed = testSeed;
+                return true;
+            }
+
+            foreach (var kpid in Assets.Prefabs)
+            {
+                if (kpid == null) continue;
+                var go = kpid.gameObject;
+                var s = go != null ? go.GetComponent<PlantableSeed>() : null;
+                if (s == null) continue;
+                string pId = kpid.PrefabTag.Name ?? go.name;
+                string proper = ToolUtil.CleanName(go.GetProperName());
+                string plantProper = ToolUtil.CleanName(s.PlantID.Name);
+                if (string.Equals(pId, key, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(proper, key, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(plantProper, key, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(s.PlantID.Name, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    resolvedTag = kpid.PrefabTag;
+                    prefab = go;
+                    seed = s;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        internal static PlantablePlot FindPlot(JObject args)
         {
             int? id = ToolUtil.GetInt(args, "id");
             int? x = ToolUtil.GetInt(args, "x");
@@ -97,6 +190,31 @@ namespace OniMcp.Tools
             result["acceptsIrrigation"] = plot.AcceptsIrrigation;
             result["occupant"] = plot.Occupant == null ? null : TargetInfo(plot.Occupant, null);
             result["acceptedSeedTags"] = plot.possibleDepositObjectTags.Select(tag => tag.Name).OrderBy(name => name).ToList();
+
+            string status;
+            if (plot.Occupant != null)
+            {
+                var h = plot.Occupant.GetComponent<HarvestDesignatable>();
+                if (h != null)
+                {
+                    if (!h.HarvestWhenReady) status = "Auto-Harvest Disabled";
+                    else if (h.CanBeHarvested() || h.MarkedForHarvest) status = "Harvest Pending";
+                    else status = "Growing";
+                }
+                else
+                {
+                    status = "Occupied";
+                }
+            }
+            else if (plot.requestedEntityTag.IsValid || plot.GetActiveRequest != null)
+            {
+                status = "Awaiting Seed Delivery";
+            }
+            else
+            {
+                status = "No Seed Selected";
+            }
+            result["status"] = status;
             return result;
         }
 
@@ -110,6 +228,15 @@ namespace OniMcp.Tools
             var harvestableComponent = harvestable.GetComponent<Harvestable>();
             if (harvestableComponent != null)
                 result["harvestableComponent"] = harvestableComponent.GetType().Name;
+
+            string status;
+            if (!harvestable.HarvestWhenReady)
+                status = "Auto-Harvest Disabled";
+            else if (harvestable.CanBeHarvested() || harvestable.MarkedForHarvest)
+                status = "Harvest Pending";
+            else
+                status = "Growing";
+            result["status"] = status;
             return result;
         }
 

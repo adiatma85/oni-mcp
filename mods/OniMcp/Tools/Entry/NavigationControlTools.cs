@@ -58,7 +58,10 @@ namespace OniMcp.Tools
                 case "set_view":
                 case "move":
                 case "switch_view":
+                case "set_overlay":
+                case "switch_overlay":
                 case "overlay":
+                case "set_mode":
                 case "focus_cell":
                 case "focus_dupe":
                 case "screenshot":
@@ -76,7 +79,8 @@ namespace OniMcp.Tools
             return new Dictionary<string, McpToolParameter>
             {
                 ["domain"] = new McpToolParameter { Type = "string", Description = "相机域；省略时按已知相机 action 自动判断", Required = false, EnumValues = new List<string> { "camera" } },
-                ["action"] = new McpToolParameter { Type = "string", Description = "相机动作：get_view、set_active_world、set_view、move、switch_view、focus_cell、focus_dupe、screenshot、coordinate_screenshot", Required = true, EnumValues = new List<string> { "get_view", "set_active_world", "set_view", "move", "switch_view", "focus_cell", "focus_dupe", "screenshot", "coordinate_screenshot" } },
+                ["action"] = new McpToolParameter { Type = "string", Description = "相机动作：get_view、set_active_world、set_view、move、switch_view、set_overlay、focus_cell、focus_dupe、screenshot、coordinate_screenshot", Required = true, EnumValues = new List<string> { "get_view", "set_active_world", "set_view", "move", "switch_view", "set_overlay", "switch_overlay", "focus_cell", "focus_dupe", "screenshot", "coordinate_screenshot" } },
+                ["overlay"] = new McpToolParameter { Type = "string", Description = "domain=camera action=set_overlay/switch_view：目标覆盖层，如 liquid/plumbing, power, gas, none/normal, temperature", Required = false },
                 ["worldId"] = new McpToolParameter { Type = "integer", Description = "目标世界 ID；set_active_world 必填，其他 action 默认当前激活世界", Required = false },
                 ["requireDiscovered"] = new McpToolParameter { Type = "boolean", Description = "set_active_world：是否要求目标世界已被发现，默认 true", Required = false },
                 ["lookAtSurface"] = new McpToolParameter { Type = "boolean", Description = "set_active_world：世界未被访问时是否 LookAtSurface，默认 true", Required = false },

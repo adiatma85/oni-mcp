@@ -27,6 +27,7 @@ namespace OniMcp.Tools
             string kind = NormalizeKind(args["kind"]?.ToString() ?? args["type"]?.ToString());
             string query = args["query"]?.ToString();
             bool includeBlueprints = ToolUtil.GetBool(args, "includeBlueprints", true);
+            bool unconnectedOnly = ToolUtil.GetBool(args, "unconnectedOnly", action == "unconnected_ports" || action == "unconnected");
             bool hasRect = HasRectInput(args);
             bool hasPointRadius = IsNearbyAction(action) && HasPointInput(args);
             var rect = hasRect ? ToolUtil.GetRect(args) : hasPointRadius ? PointRect(args) : null;
@@ -38,7 +39,7 @@ namespace OniMcp.Tools
 
             foreach (var building in Components.BuildingCompletes.Items)
             {
-                AddBuildingPorts(results, seen, building?.gameObject, false, kind, query, rect, worldId, limit);
+                AddBuildingPorts(results, seen, building?.gameObject, false, kind, query, rect, worldId, limit, unconnectedOnly);
                 if (results.Count >= limit)
                     break;
             }
@@ -47,7 +48,7 @@ namespace OniMcp.Tools
             {
                 foreach (var constructable in FindConstructables(worldId))
                 {
-                    AddBuildingPorts(results, seen, constructable?.gameObject, true, kind, query, rect, worldId, limit);
+                    AddBuildingPorts(results, seen, constructable?.gameObject, true, kind, query, rect, worldId, limit, unconnectedOnly);
                     if (results.Count >= limit)
                         break;
                 }
@@ -58,12 +59,13 @@ namespace OniMcp.Tools
             {
                 ["worldId"] = worldId,
                 ["kind"] = kind,
+                ["unconnectedOnly"] = unconnectedOnly,
                 ["query"] = string.IsNullOrWhiteSpace(query) ? null : query,
                 ["point"] = hasPointRadius ? CellObject(Grid.XYToCell(ToolUtil.GetInt(args, "x") ?? 0, ToolUtil.GetInt(args, "y") ?? 0)) : null,
                 ["rect"] = rect,
                 ["returned"] = results.Count,
                 ["summary"] = summary,
-                ["tokenHint"] = "Use nearby_ports with x/y/radius for local wiring. Each port has cell, role, layer, hasLine, connected, and line.dirs/to/glyph.",
+                ["tokenHint"] = "Use nearby_ports with x/y/radius for local wiring, or unconnected_ports to find missing utility connections. Each port has cell, role, layer, hasLine, connected, and line.dirs/to/glyph.",
                 ["ports"] = results
             }, McpJsonUtil.Settings));
         }
@@ -77,7 +79,8 @@ namespace OniMcp.Tools
             string query,
             Dictionary<string, int> rect,
             int worldId,
-            int limit)
+            int limit,
+            bool unconnectedOnly = false)
         {
             if (go == null || results.Count >= limit)
                 return;
@@ -96,6 +99,25 @@ namespace OniMcp.Tools
                 return;
 
             var ports = BuildPorts(go, building, def, kind).ToList();
+            if (unconnectedOnly)
+            {
+                ports = ports.Where(p => IsPortUnconnected(p)).ToList();
+                foreach (var p in ports)
+                {
+                    int pCell = ExtractPortCell(p);
+                    string pLayer = p.TryGetValue("layer", out object lObj) ? lObj?.ToString() : null;
+                    if (Grid.IsValidCell(pCell) && pLayer != null)
+                    {
+                        int nearest = FindNearestLineCell(pCell, LayersFor(pLayer), worldId, 16);
+                        if (Grid.IsValidCell(nearest))
+                        {
+                            p["nearestLineCell"] = CellObject(nearest);
+                            p["stubDistance"] = Math.Abs(Grid.CellColumn(pCell) - Grid.CellColumn(nearest)) + Math.Abs(Grid.CellRow(pCell) - Grid.CellRow(nearest));
+                        }
+                    }
+                }
+            }
+
             if (ports.Count == 0)
                 return;
 
@@ -113,6 +135,51 @@ namespace OniMcp.Tools
                 ["ports"] = ports,
                 ["summary"] = PortSummary(ports)
             });
+        }
+
+        private static bool IsPortUnconnected(Dictionary<string, object> port)
+        {
+            if (port == null) return false;
+            if (port.TryGetValue("connected", out object conn) && conn is bool bConn && !bConn)
+                return true;
+            if (port.TryGetValue("hasLine", out object line) && line is bool bLine && !bLine)
+                return true;
+            return false;
+        }
+
+        private static int ExtractPortCell(Dictionary<string, object> port)
+        {
+            if (port.TryGetValue("cell", out object cObj) && cObj is Dictionary<string, object> dict && dict.TryGetValue("cell", out object cellVal))
+            {
+                return Convert.ToInt32(cellVal);
+            }
+            return Grid.InvalidCell;
+        }
+
+        private static int FindNearestLineCell(int portCell, ObjectLayer[] layers, int worldId, int radius = 16)
+        {
+            if (!Grid.IsValidCell(portCell) || layers == null || layers.Length == 0) return Grid.InvalidCell;
+            int px = Grid.CellColumn(portCell);
+            int py = Grid.CellRow(portCell);
+            int bestDist = int.MaxValue;
+            int bestCell = Grid.InvalidCell;
+
+            for (int dx = -radius; dx <= radius; dx++)
+            {
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    int dist = Math.Abs(dx) + Math.Abs(dy);
+                    if (dist == 0 || dist >= bestDist) continue;
+                    int candidate = Grid.XYToCell(px + dx, py + dy);
+                    if (!Grid.IsValidCell(candidate) || !ToolUtil.CellMatchesWorld(candidate, worldId)) continue;
+                    if (HasLayer(candidate, layers))
+                    {
+                        bestDist = dist;
+                        bestCell = candidate;
+                    }
+                }
+            }
+            return bestCell;
         }
 
         private static IEnumerable<Dictionary<string, object>> BuildPorts(GameObject go, Building building, BuildingDef def, string kind)

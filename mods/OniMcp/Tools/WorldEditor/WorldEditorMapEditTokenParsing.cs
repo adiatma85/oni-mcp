@@ -79,6 +79,13 @@ namespace OniMcp.Tools
             string name = ExtractBuildTokenName(token);
             if (!string.IsNullOrWhiteSpace(name) && name.Length > 1)
             {
+                var aliases = BuildPlanningTools.PlanBuildingAliases();
+                if (aliases != null && aliases.TryGetValue(name, out string aliasPrefabId))
+                {
+                    prefabId = aliasPrefabId;
+                    return true;
+                }
+
                 foreach (var def in Assets.BuildingDefs)
                 {
                     if (def == null || string.IsNullOrEmpty(def.PrefabID))
@@ -86,8 +93,21 @@ namespace OniMcp.Tools
                     string id = MapTokenPart(def.PrefabID);
                     string proper = MapTokenPart(def.Name);
                     if (string.Equals(id, name, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(proper, name, StringComparison.OrdinalIgnoreCase)
-                        || id.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
+                        || string.Equals(proper, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        prefabId = def.PrefabID;
+                        return true;
+                    }
+                }
+
+                foreach (var def in Assets.BuildingDefs)
+                {
+                    if (def == null || string.IsNullOrEmpty(def.PrefabID))
+                        continue;
+                    string id = MapTokenPart(def.PrefabID);
+                    string proper = MapTokenPart(def.Name);
+                    if (id.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0
+                        || proper.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         prefabId = def.PrefabID;
                         return true;

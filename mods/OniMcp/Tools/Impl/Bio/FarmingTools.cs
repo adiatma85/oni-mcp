@@ -71,8 +71,9 @@ namespace OniMcp.Tools
                 Description = "统一读取/设置种植槽、种子目录、收获标记和区域铲除。action=list_planting/seed_catalog/list_harvestables/set_harvestable/set_planting/batch_set_planting/uproot；兼容 list/set/batch。",
                 Parameters = RectParams(LookupParams(new Dictionary<string, McpToolParameter>
                 {
-                    ["action"] = new McpToolParameter { Type = "string", Description = "操作：list_planting/list、seed_catalog/list_seeds/seeds、list_harvestables、set_harvestable、set_planting/set/plant、batch_set_planting/batch、uproot", Required = true, EnumValues = new List<string> { "list_planting", "list", "seed_catalog", "list_seeds", "seeds", "list_harvestables", "set_harvestable", "set_planting", "set", "plant", "batch_set_planting", "batch", "uproot" } },
-                    ["seedTag"] = new McpToolParameter { Type = "string", Description = "set_planting/batch_set_planting 且 plantingAction=set 时的种子 prefab/tag，例如 BasicPlantSeed", Required = false },
+                    ["action"] = new McpToolParameter { Type = "string", Description = "操作：list_planting/list、seed_catalog/list_seeds/seeds、list_harvestables、set_harvestable、set_planting/set/plant、batch_set_planting/batch、set_autoharvest/toggle_autoharvest、uproot", Required = true, EnumValues = new List<string> { "list_planting", "list", "seed_catalog", "list_seeds", "seeds", "list_harvestables", "set_harvestable", "set_planting", "set", "plant", "batch_set_planting", "batch", "set_autoharvest", "toggle_autoharvest", "autoharvest", "uproot" } },
+                    ["seedTag"] = new McpToolParameter { Type = "string", Description = "set_planting/batch_set_planting 且 plantingAction=set 时的种子 prefab/tag 或通用作物名，例如 Mealwood, BasicPlantSeed, PrickleFlower, Mushroom", Required = false },
+                    ["autoHarvest"] = new McpToolParameter { Type = "boolean", Description = "set_autoharvest/toggle_autoharvest 时是否开启自动收获，默认 true", Required = false },
                     ["mutationTag"] = new McpToolParameter { Type = "string", Description = "植物突变/亚种 tag；未使用突变时留空", Required = false },
                     ["plantingAction"] = new McpToolParameter { Type = "string", Description = "种植请求动作：set 或 cancel；避免与外层 action 冲突，也兼容 requestAction", Required = false, EnumValues = new List<string> { "set", "cancel" } },
                     ["requestAction"] = new McpToolParameter { Type = "string", Description = "plantingAction 的别名：set 或 cancel", Required = false, EnumValues = new List<string> { "set", "cancel" } },
@@ -97,6 +98,8 @@ namespace OniMcp.Tools
                         return ListSeedCatalog().Handler(args);
                     if (action == "list_harvestables")
                         return ListHarvestables().Handler(args);
+                    if (action == "set_autoharvest" || action == "toggle_autoharvest" || action == "autoharvest")
+                        return SetAutoHarvestArea().Handler(args);
 
                     var delegated = (JObject)args.DeepClone();
                     if (action == "set_harvestable")
@@ -128,7 +131,7 @@ namespace OniMcp.Tools
                         return SetPlanting().Handler(delegated);
                     if (action == "batch" || action == "batch_set_planting")
                         return BatchSetPlanting().Handler(delegated);
-                    return CallToolResult.Error("action must be one of list_planting, seed_catalog, list_harvestables, set_harvestable, set_planting, batch_set_planting, uproot");
+                    return CallToolResult.Error("action must be one of list_planting, seed_catalog, list_harvestables, set_harvestable, set_planting, batch_set_planting, set_autoharvest, uproot");
                 }
             };
         }

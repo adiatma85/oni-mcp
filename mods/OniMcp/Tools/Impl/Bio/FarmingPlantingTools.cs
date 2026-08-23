@@ -99,14 +99,11 @@ namespace OniMcp.Tools
                         plot.OrderRemoveOccupant();
                     }
 
-                    string seedName = args["seedTag"]?.ToString();
+                    string seedName = (args["seedTag"] ?? args["seed"] ?? args["crop"] ?? args["plant"] ?? args["entityTag"])?.ToString();
                     if (string.IsNullOrWhiteSpace(seedName))
                         return CallToolResult.Error("seedTag is required for action=set");
-                    var seedTag = TagManager.Create(seedName.Trim());
-                    var seedPrefab = Assets.GetPrefab(seedTag);
-                    var seed = seedPrefab == null ? null : seedPrefab.GetComponent<PlantableSeed>();
-                    if (seed == null)
-                        return CallToolResult.Error("seedTag is not a PlantableSeed prefab");
+                    if (!TryResolveSeedTag(seedName, out var seedTag, out var seedPrefab, out var seed))
+                        return CallToolResult.Error("seedTag '" + seedName + "' could not be resolved to a valid PlantableSeed prefab. Use action=seed_catalog to view available seeds.");
                     // Live bug: PlanterBox.possibleDepositObjectTags is often [CropSeed], while
                     // HasDepositTag(BasicSingleHarvestPlantSeed) checks the seed prefab tag itself
                     // and returns false even when the seed carries CropSeed and IsValidEntity is true.

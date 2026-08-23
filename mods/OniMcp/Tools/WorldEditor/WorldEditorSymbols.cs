@@ -137,7 +137,7 @@ namespace OniMcp.Tools
         {
             string[] common =
             {
-                "Tile", "Ladder", "Bed", "Outhouse", "WashBasin", "ResearchCenter",
+                "Tile", "Ladder", "Bed", "Outhouse", "FlushToilet", "WashBasin", "WashSink", "ResearchCenter",
                 "ManualGenerator", "Battery", "MineralDeoxidizer", "StorageLocker",
                 "Door", "Wire", "LiquidConduit", "GasConduit", "LogicWire", "SolidConduit"
             };

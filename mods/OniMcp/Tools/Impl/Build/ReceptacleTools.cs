@@ -85,7 +85,19 @@ namespace OniMcp.Tools
 
                     var receptacle = FindReceptacle(args);
                     if (receptacle == null)
-                        return CallToolResult.Error("SingleEntityReceptacle target not found");
+                    {
+                        var plot = FarmingTools.FindPlot(args);
+                        if (plot != null)
+                        {
+                            var fArgs = (JObject)args.DeepClone();
+                            if (fArgs["entityTag"] != null && fArgs["seedTag"] == null)
+                                fArgs["seedTag"] = fArgs["entityTag"];
+                            if (fArgs["action"]?.ToString() == "request")
+                                fArgs["action"] = "set";
+                            return FarmingTools.SetPlanting().Handler(fArgs);
+                        }
+                        return CallToolResult.Error("SingleEntityReceptacle or PlantablePlot target not found");
+                    }
 
                     var before = ReceptacleInfo(receptacle, includeOptions: false);
                     var error = ApplyReceptacleAction(receptacle, args);

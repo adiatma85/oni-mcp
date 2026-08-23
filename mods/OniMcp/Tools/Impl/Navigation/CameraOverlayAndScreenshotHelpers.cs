@@ -25,9 +25,9 @@ namespace OniMcp.Tools
                 ["action"] = new McpToolParameter
                 {
                     Type = "string",
-                    Description = "操作：get_view、set_active_world、set_view、move、switch_view、focus_cell、focus_dupe、screenshot、coordinate_screenshot",
+                    Description = "操作：get_view、set_active_world、set_view、move、switch_view、set_overlay、focus_cell、focus_dupe、screenshot、coordinate_screenshot",
                     Required = true,
-                    EnumValues = new List<string> { "get_view", "set_active_world", "set_view", "move", "switch_view", "focus_cell", "focus_dupe", "screenshot", "coordinate_screenshot" }
+                    EnumValues = new List<string> { "get_view", "set_active_world", "set_view", "move", "switch_view", "set_overlay", "switch_overlay", "focus_cell", "focus_dupe", "screenshot", "coordinate_screenshot" }
                 },
                 ["worldId"] = new McpToolParameter { Type = "integer", Description = "目标世界 ID，set_active_world 必填；其他 action 默认当前激活世界", Required = false },
                 ["requireDiscovered"] = new McpToolParameter { Type = "boolean", Description = "set_active_world：是否要求目标世界已被发现，默认 true", Required = false },
@@ -40,8 +40,9 @@ namespace OniMcp.Tools
                 ["dx"] = new McpToolParameter { Type = "number", Description = "move pan：X 方向偏移，默认 0", Required = false },
                 ["dy"] = new McpToolParameter { Type = "number", Description = "move pan：Y 方向偏移，默认 0", Required = false },
                 ["duration"] = new McpToolParameter { Type = "number", Description = "move：平滑移动秒数，默认 0.5", Required = false },
-                ["view"] = new McpToolParameter { Type = "string", Description = "switch_view/coordinate_screenshot 覆盖层视图", Required = false, EnumValues = OverlayViewNames },
-                ["screenshot"] = new McpToolParameter { Type = "boolean", Description = "switch_view：是否保存切换后的截图，默认 true", Required = false },
+                ["view"] = new McpToolParameter { Type = "string", Description = "switch_view/set_overlay/coordinate_screenshot 覆盖层视图，例如 liquid, power, gas, none, temp", Required = false, EnumValues = OverlayViewNames },
+                ["overlay"] = new McpToolParameter { Type = "string", Description = "view 的别名，例如 liquid, power, gas, none, normal, temperature", Required = false },
+                ["screenshot"] = new McpToolParameter { Type = "boolean", Description = "switch_view/set_overlay：是否保存切换后的截图，默认 true；如果只想切换游戏覆盖层不保存截图可传 false", Required = false },
                 ["filename"] = new McpToolParameter { Type = "string", Description = "screenshot/switch_view/coordinate_screenshot：可选截图文件名", Required = false },
                 ["waitFrames"] = new McpToolParameter { Type = "integer", Description = "switch_view/coordinate_screenshot：截图前等待的 Unity 帧数", Required = false },
                 ["allowSound"] = new McpToolParameter { Type = "boolean", Description = "switch_view：是否播放视图切换音效，默认 false", Required = false },
@@ -69,56 +70,85 @@ namespace OniMcp.Tools
                 case "none":
                 case "normal":
                 case "base":
+                case "default":
+                case "默认":
+                case "正常":
+                case "无":
                     viewName = "none";
                     mode = OverlayModes.None.ID;
                     return true;
                 case "oxygen":
                 case "gas":
+                case "氧气":
                     viewName = "oxygen";
                     mode = OverlayModes.Oxygen.ID;
                     return true;
                 case "power":
                 case "electric":
                 case "electrical":
+                case "wire":
+                case "wires":
+                case "电力":
+                case "电线":
                     viewName = "power";
                     mode = OverlayModes.Power.ID;
                     return true;
                 case "gas_conduits":
                 case "gas_pipe":
                 case "gas_pipes":
+                case "gas_conduit":
+                case "气管":
+                case "气体管道":
                     viewName = "gas_conduits";
                     mode = OverlayModes.GasConduits.ID;
                     return true;
                 case "liquid_conduits":
                 case "liquid_pipe":
                 case "liquid_pipes":
+                case "liquid_conduit":
                 case "plumbing":
+                case "pipes":
+                case "pipe":
+                case "水管":
+                case "液管":
+                case "管道":
+                case "液体管道":
                     viewName = "liquid_conduits";
                     mode = OverlayModes.LiquidConduits.ID;
                     return true;
                 case "solid_conveyor":
                 case "shipping":
                 case "conveyor":
+                case "运输":
+                case "传送带":
                     viewName = "solid_conveyor";
                     mode = OverlayModes.SolidConveyor.ID;
                     return true;
                 case "logic":
                 case "automation":
+                case "自动化":
+                case "信号":
+                case "信号线":
                     viewName = "logic";
                     mode = OverlayModes.Logic.ID;
                     return true;
                 case "temperature":
                 case "temp":
+                case "thermal":
+                case "温度":
+                case "热量":
                     viewName = "temperature";
                     mode = OverlayModes.Temperature.ID;
                     return true;
                 case "heat_flow":
                 case "heatflow":
+                case "热流":
                     viewName = "heat_flow";
                     mode = OverlayModes.HeatFlow.ID;
                     return true;
                 case "thermal_conductivity":
                 case "conductivity":
+                case "导热":
                     viewName = "thermal_conductivity";
                     mode = OverlayModes.ThermalConductivity.ID;
                     return true;
@@ -126,54 +156,74 @@ namespace OniMcp.Tools
                 case "material":
                 case "tile":
                 case "tiles":
+                case "材料":
+                case "材质":
                     viewName = "materials";
                     mode = OverlayModes.TileMode.ID;
                     return true;
                 case "light":
+                case "光照":
+                case "亮度":
                     viewName = "light";
                     mode = OverlayModes.Light.ID;
                     return true;
                 case "decor":
+                case "装饰":
+                case "装饰度":
                     viewName = "decor";
                     mode = OverlayModes.Decor.ID;
                     return true;
                 case "rooms":
                 case "room":
+                case "房间":
                     viewName = "rooms";
                     mode = OverlayModes.Rooms.ID;
                     return true;
                 case "priorities":
                 case "priority":
+                case "优先级":
                     viewName = "priorities";
                     mode = OverlayModes.Priorities.ID;
                     return true;
                 case "disease":
                 case "germs":
+                case "germ":
+                case "病菌":
+                case "细菌":
                     viewName = "disease";
                     mode = OverlayModes.Disease.ID;
                     return true;
                 case "radiation":
                 case "rad":
+                case "辐射":
                     viewName = "radiation";
                     mode = OverlayModes.Radiation.ID;
                     return true;
                 case "sound":
                 case "noise":
+                case "声音":
+                case "噪音":
                     viewName = "sound";
                     mode = OverlayModes.Sound.ID;
                     return true;
                 case "suit":
                 case "exosuit":
                 case "atmo_suit":
+                case "太空服":
+                case "防护服":
                     viewName = "suit";
                     mode = OverlayModes.Suit.ID;
                     return true;
                 case "crop":
                 case "farming":
+                case "farm":
+                case "作物":
+                case "农业":
                     viewName = "crop";
                     mode = OverlayModes.Crop.ID;
                     return true;
                 case "harvest":
+                case "收获":
                     viewName = "harvest";
                     mode = OverlayModes.Harvest.ID;
                     return true;
@@ -286,7 +336,7 @@ namespace OniMcp.Tools
             }
         }
 
-        private static void ApplyOverlayMode(HashedString mode, bool allowSound)
+        internal static void ApplyOverlayMode(HashedString mode, bool allowSound)
         {
             var overlay = OverlayScreen.Instance;
             if (overlay == null)
