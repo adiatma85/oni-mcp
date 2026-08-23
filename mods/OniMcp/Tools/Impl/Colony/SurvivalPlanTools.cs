@@ -19,10 +19,10 @@ namespace OniMcp.Tools
                 Risk = "none",
                 Hidden = true,
                 Tags = new List<string> { "survival", "diagnostics", "food", "oxygen", "long-run", "100-cycle" },
-                Description = "低 token 生存分诊：action=plan，把 food/oxygen/stress/red-alert 诊断转成是否可长跑、阻塞原因和下一步 MCP 调用建议。",
+                Description = "低 token 生存分诊：action=plan，把 food/oxygen/stress/red-alert 诊断转成是否可长跑、阻塞原因和下一步 MCP 调用建议；action=advise 返回按 priority 排序的行动建议，结合实时状态、游戏自带诊断意见和攻略知识库。",
                 Parameters = new Dictionary<string, McpToolParameter>
                 {
-                    ["action"] = new McpToolParameter { Type = "string", Description = "plan 或 status，默认 plan", Required = false },
+                    ["action"] = new McpToolParameter { Type = "string", Description = "plan、advise 或 status，默认 plan", Required = false },
                     ["targetCycles"] = new McpToolParameter { Type = "integer", Description = "目标长跑周期数，默认 100", Required = false },
                     ["foodKcalPerDupe"] = new McpToolParameter { Type = "number", Description = "每个复制人的最低食物库存阈值，默认 2000 kcal", Required = false },
                     ["visibleOnly"] = new McpToolParameter { Type = "boolean", Description = "是否只统计已揭示格子内食物，默认 true；调试可传 false", Required = false },
@@ -32,6 +32,9 @@ namespace OniMcp.Tools
                 {
                     if (Game.Instance == null)
                         return CallToolResult.Error("Game not initialized");
+                    string action = (args?["action"]?.ToString() ?? string.Empty).Trim().ToLowerInvariant();
+                    if (action == "advise" || action == "advice" || action == "recommend")
+                        return HandleColonyAdvice(args);
                     return CallToolResult.Text(JsonConvert.SerializeObject(BuildSurvivalPlan(args), McpJsonUtil.Settings));
                 }
             };

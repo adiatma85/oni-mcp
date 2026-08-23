@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -118,10 +119,10 @@ fn to_pascal_case(s: &str) -> String {
 fn read_game_path_from_props(repo_root: &Path) -> Result<PathBuf> {
     let props = repo_root.join(BUILD_PROPS);
     if !props.exists() {
-        anyhow::bail!("找不到 {}，请先运行 `onim setup` 初始化项目", BUILD_PROPS);
+        anyhow::bail!("{}", i18n::err_props_missing(BUILD_PROPS.to_string()));
     }
     let content = std::fs::read_to_string(&props)
-        .with_context(|| format!("读取 {} 失败", props.display()))?;
+        .with_context(|| i18n::err_read_failed(props.display().to_string()))?;
 
     parse_game_path_from_props(&content)
 }
@@ -135,14 +136,11 @@ fn parse_game_path_from_props(content: &str) -> Result<PathBuf> {
             let val = &content[s + "<OniGamePath>".len()..e];
             let trimmed = val.trim();
             if trimmed.is_empty() {
-                anyhow::bail!("{} 中的 OniGamePath 为空", BUILD_PROPS);
+                anyhow::bail!("{}", i18n::err_game_path_empty(BUILD_PROPS.to_string()));
             }
             Ok(PathBuf::from(trimmed))
         }
-        _ => anyhow::bail!(
-            "{} 中找不到 <OniGamePath> 标签，请先运行 `onim setup`",
-            BUILD_PROPS
-        ),
+        _ => anyhow::bail!("{}", i18n::err_game_path_tag_missing(BUILD_PROPS.to_string())),
     }
 }
 
@@ -173,7 +171,7 @@ pub fn read_doctor_diagnostics(explicit_path: Option<PathBuf>) -> Result<DoctorC
 }
 
 fn resolve_doctor_config_location(explicit_path: Option<PathBuf>) -> Result<(PathBuf, PathBuf)> {
-    let current_dir = env::current_dir().context("无法获取当前工作目录")?;
+    let current_dir = env::current_dir().with_context(|| i18n::err_no_cwd())?;
     let config_path = match explicit_path {
         Some(path) if path.is_absolute() => path,
         Some(path) => current_dir.join(path),
@@ -182,7 +180,7 @@ fn resolve_doctor_config_location(explicit_path: Option<PathBuf>) -> Result<(Pat
     let repo_root = config_path
         .parent()
         .map(Path::to_path_buf)
-        .context("无法确定 onim 配置文件所在目录")?;
+        .with_context(|| i18n::err_no_config_dir())?;
     Ok((config_path, repo_root))
 }
 
@@ -194,16 +192,13 @@ fn inspect_config_for_doctor(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return (
                 None,
-                Some(format!("配置文件不存在：{}", config_path.display())),
+                Some(i18n::err_config_missing_at(config_path.display().to_string())),
             );
         }
         Err(error) => {
             return (
                 None,
-                Some(format!(
-                    "读取配置文件失败：{}（{error}）",
-                    config_path.display()
-                )),
+                Some(i18n::err_config_read(config_path.display().to_string(), error.to_string())),
             );
         }
     };
@@ -212,10 +207,7 @@ fn inspect_config_for_doctor(
         Ok(mods) => (Some(mods), None),
         Err(error) => (
             None,
-            Some(format!(
-                "解析配置文件失败：{}（{error}）",
-                config_path.display()
-            )),
+            Some(i18n::err_config_parse(config_path.display().to_string(), error.to_string())),
         ),
     }
 }
@@ -228,12 +220,12 @@ fn inspect_game_path_for_doctor(props_path: &Path) -> (Option<PathBuf>, Option<S
     let content = match std::fs::read_to_string(props_path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return (None, Some(format!("找不到 {}", props_path.display())));
+            return (None, Some(i18n::err_file_missing(props_path.display().to_string())));
         }
         Err(error) => {
             return (
                 None,
-                Some(format!("读取 {} 失败：{error}", props_path.display())),
+                Some(i18n::err_read_failed_with(props_path.display().to_string(), error.to_string())),
             );
         }
     };
@@ -244,33 +236,50 @@ fn inspect_game_path_for_doctor(props_path: &Path) -> (Option<PathBuf>, Option<S
     }
 }
 
-fn managed_path_for_game(game_path: &Path) -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        game_path.join("OxygenNotIncluded_Data").join("Managed")
+/// Candidate `Managed` directories for a given game path, most specific first.
+///
+/// The macOS app bundle layout varies by Unity version: current ONI builds put the
+/// player data under `Contents/Resources/Data`, older Unity used `Contents/<Product>_Data`.
+/// Accept the game directory, the `.app` itself, or the `Contents` directory, so a user
+/// who pastes any of those in `onim setup` still gets a working config.
+pub fn managed_path_candidates(game_path: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    // Windows / Linux, and macOS when pointed straight at a Contents directory.
+    candidates.push(game_path.join("OxygenNotIncluded_Data").join("Managed"));
+    candidates.push(game_path.join("Resources").join("Data").join("Managed"));
+    candidates.push(game_path.join("Data").join("Managed"));
+
+    // macOS: the game directory containing the .app, or the .app itself.
+    for contents in [
+        game_path.join("OxygenNotIncluded.app").join("Contents"),
+        game_path.join("Contents"),
+    ] {
+        candidates.push(contents.join("Resources").join("Data").join("Managed"));
+        candidates.push(contents.join("OxygenNotIncluded_Data").join("Managed"));
+        candidates.push(contents.join("Data").join("Managed"));
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let mac_managed = game_path
-            .join("OxygenNotIncluded.app")
-            .join("Contents")
-            .join("OxygenNotIncluded_Data")
-            .join("Managed");
-        if mac_managed.exists() {
-            mac_managed
-        } else {
-            game_path.join("OxygenNotIncluded_Data").join("Managed")
-        }
-    }
+
+    candidates
+}
+
+/// Resolve the `Managed` directory, preferring one that actually contains the game
+/// assemblies. Falls back to the first candidate so callers still get a path to report
+/// in an error message when nothing matched.
+pub fn managed_path_for_game(game_path: &Path) -> PathBuf {
+    let candidates = managed_path_candidates(game_path);
+    candidates
+        .iter()
+        .find(|p| p.join("Assembly-CSharp.dll").exists())
+        .cloned()
+        .or_else(|| candidates.iter().find(|p| p.exists()).cloned())
+        .unwrap_or_else(|| candidates.into_iter().next().unwrap_or_default())
 }
 
 impl Config {
     pub fn select_all_mods(&self) -> Result<Vec<SelectedMod>> {
         if self.mods.is_empty() {
-            anyhow::bail!(
-                "没有配置任何 Mod，请在 {} 中添加 [mods.XXX]",
-                DEFAULT_CONFIG_NAME
-            );
+            anyhow::bail!("{}", i18n::err_no_mods_in(DEFAULT_CONFIG_NAME.to_string()));
         }
 
         let mut keys: Vec<_> = self.mods.keys().cloned().collect();
@@ -281,7 +290,7 @@ impl Config {
             let cfg = self
                 .mods
                 .get(&key)
-                .with_context(|| format!("配置缺失：{}", key))?
+                .with_context(|| i18n::err_config_absent(key.to_string()))?
                 .clone();
             result.push(SelectedMod {
                 name: cfg.mod_name(&key),
@@ -293,19 +302,12 @@ impl Config {
 
     pub fn select_mod(&self, explicit: Option<String>) -> Result<SelectedMod> {
         if self.mods.is_empty() {
-            anyhow::bail!(
-                "没有配置任何 Mod，请在 {} 中添加 [mods.XXX]",
-                DEFAULT_CONFIG_NAME
-            );
+            anyhow::bail!("{}", i18n::err_no_mods_in(DEFAULT_CONFIG_NAME.to_string()));
         }
         let key = match explicit {
             Some(k) => {
                 if !self.mods.contains_key(&k) {
-                    anyhow::bail!(
-                        "找不到 Mod '{}'，已配置的 Mod：{}\n请用 -m 指定正确的名称。",
-                        k,
-                        self.mods.keys().cloned().collect::<Vec<_>>().join(", ")
-                    );
+                    anyhow::bail!("{}", i18n::err_mod_not_found(k.to_string(), self.mods.keys().cloned().collect::<Vec<_>>().join(", ")));
                 }
                 k
             }
@@ -355,18 +357,11 @@ impl Config {
 
     pub fn validate(&self) -> Result<()> {
         if !self.game_path.exists() {
-            anyhow::bail!(
-                "游戏路径不存在：{}\n请运行 `onim setup` 重新配置",
-                self.game_path.display()
-            );
+            anyhow::bail!("{}", i18n::err_game_path_missing(self.game_path.display().to_string()));
         }
         let managed = self.managed_path();
         if !managed.join("Assembly-CSharp.dll").exists() {
-            anyhow::bail!(
-                "找不到 Assembly-CSharp.dll，游戏路径可能不正确：{}\n期望位置：{}\n请运行 `onim setup` 重新配置",
-                self.game_path.display(),
-                managed.display()
-            );
+            anyhow::bail!("{}", i18n::err_assembly_missing(self.game_path.display().to_string(), managed.display().to_string()));
         }
         Ok(())
     }
@@ -389,9 +384,9 @@ pub fn load(explicit_path: Option<PathBuf>) -> Result<Config> {
 
     let cfg: Config = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)
-            .with_context(|| format!("读取配置文件失败：{}", config_path.display()))?;
+            .with_context(|| i18n::err_config_read_simple(config_path.display().to_string()))?;
         let mut parsed: Config = toml::from_str(&content)
-            .with_context(|| format!("解析配置文件失败：{}", config_path.display()))?;
+            .with_context(|| i18n::err_config_parse_simple(config_path.display().to_string()))?;
         parsed.game_path = game_path;
         parsed
     } else {
@@ -405,13 +400,7 @@ pub fn load(explicit_path: Option<PathBuf>) -> Result<Config> {
     for (key, m) in &cfg.mods {
         let abs = m.project_abs(&repo_root);
         if !abs.exists() {
-            anyhow::bail!(
-                "Mod '{}' 的路径不存在：{}\n请在 {} 中检查 [mods.{}] 的 path",
-                key,
-                abs.display(),
-                config_path.display(),
-                key
-            );
+            anyhow::bail!("{}", i18n::err_mod_path_missing(key.to_string(), abs.display().to_string(), config_path.display().to_string(), key.to_string()));
         }
     }
 
@@ -440,7 +429,7 @@ fn find_config_file() -> Result<Option<PathBuf>> {
 fn game_user_data_dir() -> Result<PathBuf> {
     #[cfg(target_os = "linux")]
     {
-        let home = env::var_os("HOME").context("无法获取 HOME 环境变量")?;
+        let home = env::var_os("HOME").with_context(|| i18n::err_no_home())?;
         Ok(PathBuf::from(home).join(".config/unity3d/Klei/Oxygen Not Included"))
     }
 
@@ -457,28 +446,24 @@ fn game_user_data_dir() -> Result<PathBuf> {
                 "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)",
             ])
             .output()
-            .context("无法通过 Windows Known Folder API 获取 Documents 目录")?;
+            .with_context(|| i18n::err_win_docs_api())?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!(
-                "通过 Windows Known Folder API 获取 Documents 目录失败（{}）：{}",
-                output.status,
-                stderr.trim()
-            );
+            anyhow::bail!("{}", i18n::err_win_docs_failed(output.status.to_string(), stderr.trim().to_string()));
         }
 
         let documents = String::from_utf8(output.stdout)
-            .context("Windows Known Folder API 返回的 Documents 目录不是有效 UTF-8")?;
+            .with_context(|| i18n::err_win_docs_utf8())?;
         let documents = documents.trim();
         if documents.is_empty() {
-            anyhow::bail!("Windows Known Folder API 返回了空的 Documents 目录");
+            anyhow::bail!("{}", i18n::err_win_docs_empty());
         }
         Ok(PathBuf::from(documents).join("Klei/OxygenNotIncluded"))
     }
 
     #[cfg(target_os = "macos")]
     {
-        let home = env::var_os("HOME").context("无法获取 HOME 环境变量")?;
+        let home = env::var_os("HOME").with_context(|| i18n::err_no_home())?;
         Ok(PathBuf::from(home).join("Library/Application Support/unity.Klei.Oxygen Not Included"))
     }
 }

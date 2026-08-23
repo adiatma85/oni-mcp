@@ -4,14 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config;
+use crate::i18n;
 
 pub fn run(explicit_config_path: Option<PathBuf>) -> Result<()> {
     let diagnostics = config::read_doctor_diagnostics(explicit_config_path)?;
     let mut issues = Vec::new();
 
-    println!("🩺 onim 健康检查\n");
+    println!("🩺 {}\n", i18n::doctor_title());
     check_config(
-        "onim 配置文件",
+        i18n::label_config_file(),
         &diagnostics.config_path,
         diagnostics.config_error.as_deref(),
         &mut issues,
@@ -25,41 +26,41 @@ pub fn run(explicit_config_path: Option<PathBuf>) -> Result<()> {
 
     match (&diagnostics.game_path, &diagnostics.managed_path) {
         (Some(game_path), Some(managed_path)) => {
-            check_directory("ONI 游戏路径", game_path, &mut issues);
-            check_directory("托管程序集目录", managed_path, &mut issues);
+            check_directory(i18n::label_game_path(), game_path, &mut issues);
+            check_directory(i18n::label_managed_dir(), managed_path, &mut issues);
             check_file(
                 "Assembly-CSharp.dll",
                 &managed_path.join("Assembly-CSharp.dll"),
                 &mut issues,
             );
         }
-        _ => println!("❌ ONI 游戏路径与托管程序集目录：无法从 Directory.Build.props 解析"),
+        _ => println!("❌ {}", i18n::game_path_unresolvable()),
     }
 
     match (&diagnostics.game_mods_dir, &diagnostics.game_mods_dir_error) {
-        (Some(path), None) => check_directory("游戏 Mod 根目录", path, &mut issues),
+        (Some(path), None) => check_directory(i18n::label_mods_root(), path, &mut issues),
         (_, Some(error)) => {
-            println!("❌ 游戏 Mod 根目录：无法解析（{error}）");
-            issues.push(format!("游戏 Mod 根目录无法解析：{error}"));
+            println!("❌ {}", i18n::mods_root_unresolvable(error.to_string()));
+            issues.push(i18n::err_mods_root_unresolvable(error.to_string()));
         }
         _ => unreachable!(),
     }
 
-    println!("\n🔧 外部工具：");
+    println!("\n🔧 {}", i18n::external_tools());
     for tool in required_tools() {
         if tool_on_path(tool) {
             println!("   ✅ {tool}");
         } else {
-            println!("   ❌ {tool}（PATH 中未找到）");
-            issues.push(format!("缺少外部工具：{tool}"));
+            println!("❌ {}", i18n::tool_not_on_path(tool));
+            issues.push(i18n::err_tool_missing(tool));
         }
     }
 
-    println!("\n📦 已配置 Mod 源码：");
+    println!("\n📦 {}", i18n::configured_mod_sources());
     match diagnostics.mods {
         Some(mods) if mods.is_empty() => {
-            println!("   ❌ 未配置任何 Mod");
-            issues.push("未配置任何 Mod".to_string());
+            println!("   ❌ {}", i18n::no_mods_configured().trim());
+            issues.push(i18n::err_no_mods_configured().to_string());
         }
         Some(mods) => {
             let mut mods: Vec<_> = mods.iter().collect();
@@ -73,46 +74,46 @@ pub fn run(explicit_config_path: Option<PathBuf>) -> Result<()> {
                 );
             }
         }
-        None => println!("   ❌ 配置文件无法解析，无法读取 Mod 源码路径"),
+        None => println!("   ❌ {}", i18n::config_unreadable_for_mods().trim()),
     }
 
     if issues.is_empty() {
-        println!("\n✅ 环境检查通过");
+        println!("\n✅ {}", i18n::doctor_pass());
         Ok(())
     } else {
-        println!("\n❌ 环境检查失败（{} 项）：", issues.len());
+        println!("\n❌ {}", i18n::doctor_fail(issues.len()));
         for issue in &issues {
             println!("   • {issue}");
         }
-        bail!("onim doctor 发现 {} 项环境问题", issues.len());
+        bail!("{}", i18n::err_doctor_issues(issues.len()));
     }
 }
 
 fn check_config(label: &str, path: &Path, error: Option<&str>, issues: &mut Vec<String>) {
     match error {
         Some(error) => {
-            println!("❌ {label}：{}（{error}）", path.display());
+            println!("❌ {label}{}{}（{error}）", i18n::sep(), path.display());
             issues.push(error.to_string());
         }
-        None => println!("✅ {label}：{}", path.display()),
+        None => println!("✅ {label}{}{}", i18n::sep(), path.display()),
     }
 }
 
 fn check_directory(label: &str, path: &Path, issues: &mut Vec<String>) {
     if path.is_dir() {
-        println!("✅ {label}：{}", path.display());
+        println!("✅ {label}{}{}", i18n::sep(), path.display());
     } else {
-        println!("❌ {label}：{}", path.display());
-        issues.push(format!("{label} 不存在或不是目录：{}", path.display()));
+        println!("❌ {label}{}{}", i18n::sep(), path.display());
+        issues.push(i18n::path_not_a_dir(label.to_string(), path.display().to_string()));
     }
 }
 
 fn check_file(label: &str, path: &Path, issues: &mut Vec<String>) {
     if path.is_file() {
-        println!("✅ {label}：{}", path.display());
+        println!("✅ {label}{}{}", i18n::sep(), path.display());
     } else {
-        println!("❌ {label}：{}", path.display());
-        issues.push(format!("{label} 不存在：{}", path.display()));
+        println!("❌ {label}{}{}", i18n::sep(), path.display());
+        issues.push(i18n::path_missing(label.to_string(), path.display().to_string()));
     }
 }
 

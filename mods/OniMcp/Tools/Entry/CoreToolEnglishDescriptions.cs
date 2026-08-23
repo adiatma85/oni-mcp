@@ -49,7 +49,7 @@ namespace OniMcp.Tools
                     Describe(tool, SearchDescriptions());
                     break;
                 case "server_control":
-                    tool.Description = "Unified server and MCP entrypoint for diagnostics, client requests, catalog search, coverage audits, batched tool calls, and restricted agent-program execution.";
+                    tool.Description = "Unified server and MCP entrypoint for diagnostics, client requests, catalog search, coverage audits, the static Oxygen Not Included strategy corpus (domain=strategy), batched tool calls, and restricted agent-program execution.";
                     Describe(tool, ServerDescriptions());
                     break;
             }
@@ -332,8 +332,10 @@ namespace OniMcp.Tools
         private static Dictionary<string, string> ServerDescriptions()
         {
             var d = CommonDescriptions();
-            d["domain"] = "Server subsystem: diagnostics, client_request, catalog, batch, or program. Defaults to diagnostics.";
-            d["action"] = "Server action for the selected domain.";
+            d["domain"] = "Server subsystem: diagnostics, client_request, catalog, strategy, batch, or program. Defaults to diagnostics.";
+            d["action"] = "Server action for the selected domain. strategy accepts query, categories, or index.";
+            d["category"] = "strategy query: filter by topic bucket, e.g. oxygen, thermal, gas_fluid, power, food, farming, ranching, automation, dupes, space.";
+            d["dlc"] = "strategy query: filter by game version, base or spaced_out. Entries tagged both always match. Defaults to any.";
             d["file"] = "Log file selector: current or previous.";
             d["lines"] = "Number of log lines to return.";
             d["surface"] = "Surface audit target.";

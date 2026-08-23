@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
@@ -18,9 +19,9 @@ pub fn unzip(zip: &Path, dest: &Path) -> Result<()> {
                 command.as_str(),
             ])
             .status()
-            .context("解压失败（PowerShell Expand-Archive）")?;
+            .with_context(|| i18n::err_unzip_powershell())?;
         if !status.success() {
-            anyhow::bail!("解压失败（PowerShell Expand-Archive，退出状态：{status}）");
+            anyhow::bail!("{}", i18n::err_unzip_powershell_status(status.to_string()));
         }
     }
 
@@ -32,9 +33,9 @@ pub fn unzip(zip: &Path, dest: &Path) -> Result<()> {
             .arg("-d")
             .arg(dest)
             .status()
-            .context("解压失败（unzip），请确认已安装 unzip")?;
+            .with_context(|| i18n::err_unzip_cli())?;
         if !status.success() {
-            anyhow::bail!("解压失败（unzip，退出状态：{status}）");
+            anyhow::bail!("{}", i18n::err_unzip_cli_status(status.to_string()));
         }
     }
 

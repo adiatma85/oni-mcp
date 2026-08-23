@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
@@ -21,23 +22,23 @@ pub fn run(cfg: &Config, selected: &SelectedMod) -> Result<()> {
     let zip = dist.join(format!("{}.zip", assembly_name));
 
     if !zip.exists() {
-        anyhow::bail!("找不到构建产物：{}", zip.display());
+        anyhow::bail!("{}", i18n::err_artifact_missing(zip.display().to_string()));
     }
 
     let local_dir = cfg.local_mod_dir(&selected.name)?;
-    println!("\n📥 安装到 Local 目录：{}", local_dir.display());
+    println!("\n📥 {}", i18n::installing_local(local_dir.display().to_string()));
 
     if local_dir.exists() {
         fs::remove_dir_all(&local_dir)
-            .with_context(|| format!("清理旧 Local 目录失败：{}", local_dir.display()))?;
+            .with_context(|| i18n::err_clean_local(local_dir.display().to_string()))?;
     }
     fs::create_dir_all(&local_dir)
-        .with_context(|| format!("创建 Local 目录失败：{}", local_dir.display()))?;
+        .with_context(|| i18n::err_create_local(local_dir.display().to_string()))?;
 
     archive::unzip(&zip, &local_dir)?;
 
-    println!("✅ 已正式安装到游戏 Local 目录");
-    println!("   启动游戏 → Mod 列表 → 启用 '{}'", selected.name);
+    println!("✅ {}", i18n::install_done());
+    println!("{}", i18n::enable_in_game(selected.name.to_string()));
 
     Ok(())
 }

@@ -64,7 +64,7 @@ not callable as MCP tools.
 
 | 工具 | 主要 domain/action | 风险 | 用途 |
 |------|--------------------|------|------|
-| `server_control` | `catalog`, `batch`, `program` | read/execute | 健康检查、工具清单、工具搜索、目标指南、批量调用、agent program |
+| `server_control` | `catalog`, `strategy`, `batch`, `program` | read/execute | 健康检查、工具清单、工具搜索、目标指南、攻略知识库、批量调用、agent program |
 | `read_control` | `world`, `area`, `resources`, `buildings`, `knowledge`, `infrastructure` | read | 世界地图、区域、资源、建筑、机制知识、电力和房间摘要 |
 | `search_control` | `tools`, `world`, `resources`, `buildings`, `dupes`, `knowledge` | read | Dedicated search with action-ready `nextActions` |
 | `game_control` | `speed`, `state`, `save`, `sandbox`, `ui` | read/execute/dangerous | 暂停、恢复、调速、存档、沙盒、UI 编辑标记 |
@@ -73,6 +73,31 @@ not callable as MCP tools.
 | `orders_control` | `area`, `priority`, `designation`, `conduit` | execute/dangerous | 挖掘、清扫、拖地、拆除、优先级、区域订单、线路/管线剪断 |
 | `dupes_control` | `info`, `priority`, `command`, `skill`, `hat`, `assignable` | read/write/execute | 复制人状态、命令、优先级、改名、技能、帽子、可分配物 |
 | `colony_control` | `snapshot`, `read`, `report`, `diagnostic`, `notification`, `management`, `bio` | read/write | 殖民地快照、报告、诊断、通知、日程、饮食、研究、医疗、农牧 |
+
+## 攻略知识库
+
+`server_control domain=strategy` 提供静态缺氧攻略知识库，内容随 mod 编译进 DLL，不依赖游戏内百科数据库。
+
+| action | 用途 |
+|--------|------|
+| `query` | 按关键词/分类/DLC 检索条目，返回加权排序结果 |
+| `categories` | 列出主题分类和条目数 |
+| `index` | 知识库概览：分类、DLC 分布、用法建议 |
+
+参数：`query`（中英文关键词）、`category`、`dlc`（`base`/`spaced_out`/`any`）、`detail`（`brief`/`full`）、`limit`（默认 8，最大 40）。
+
+条目字段的职责划分是这个知识库的核心约定：
+
+- `body` / `formulas` / `cautions`：游戏本身不会告诉你的判断、公式和失败模式，由人工整理。
+- `derive`：**游戏运行时已经知道的数值**，只记录该去哪里读，不抄写具体数字。建筑功耗、科技 id、植物温度区间等都属于这一类。
+
+这样做是为了让知识库在游戏版本更新后不会静默过期。看到 `derive` 就应该去读实时数据，而不是相信缓存的数字。
+
+```text
+server_control domain=strategy action=query query="SPOM"
+server_control domain=strategy action=query category=thermal dlc=base
+oni://strategy/query?query=电解器&detail=brief
+```
 
 ## 建造规划
 
@@ -179,7 +204,9 @@ This directly creates a continuous line, with no separate follow-up connection s
 | `oni://buildings/defs` | 可建造建筑定义 |
 | `oni://tools/manifest` | 工具清单 |
 | `oni://tools/guide` | 按目标推荐工具链 |
-| `oni://guide/mechanics` | 机制、公式、边界条件速查 |
+| `oni://strategy/index` | 攻略知识库概览：分类、DLC 分布、用法 |
+| `oni://strategy/categories` | 攻略知识库主题分类和条目数 |
+| `oni://strategy/query{?query,category,dlc,detail,limit}` | 攻略知识库检索：机制、公式、建造顺序判断、生态区提示 |
 
 ## 代码目录
 

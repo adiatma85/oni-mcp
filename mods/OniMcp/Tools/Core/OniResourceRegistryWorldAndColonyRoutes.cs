@@ -97,9 +97,20 @@ namespace OniMcp.Tools
                                     return ReadToolResource(uri, "server_control", query, "application/json");
                                 }
 
+            if (parsed.Host == "strategy")
+                                {
+                                    string strategyAction = parsed.AbsolutePath == "/categories" ? "categories"
+                                        : parsed.AbsolutePath == "/index" ? "index"
+                                        : "query";
+                                    var query = ParseQuery(parsed.Query);
+                                    query["domain"] = "strategy";
+                                    query["action"] = strategyAction;
+                                    return ReadToolResource(uri, "server_control", query, "application/json");
+                                }
+
             if (parsed.Host == "guide" && parsed.AbsolutePath == "/mechanics")
                                 {
-                                    return ErrorResource(uri, "guide/mechanics is disabled because in-game database queries are crash-prone on this runtime.");
+                                    return ErrorResource(uri, "guide/mechanics is disabled; the replacement is oni://strategy/query.");
                                 }
 
             if (parsed.Host == "tools" && parsed.AbsolutePath == "/manifest")

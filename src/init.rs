@@ -1,3 +1,4 @@
+use crate::i18n;
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
@@ -26,14 +27,14 @@ fn pascal_case(input: &str) -> String {
 
 fn replace_in_file(path: &PathBuf, replacements: &[(String, String)]) -> Result<()> {
     let content =
-        fs::read_to_string(path).with_context(|| format!("读取文件失败：{}", path.display()))?;
+        fs::read_to_string(path).with_context(|| i18n::err_read_file(path.display().to_string()))?;
     let mut new_content = content.clone();
     for (old, new) in replacements {
         new_content = new_content.replace(old, new);
     }
     if new_content != content {
         fs::write(path, new_content)
-            .with_context(|| format!("写入文件失败：{}", path.display()))?;
+            .with_context(|| i18n::err_write_file(path.display().to_string()))?;
     }
     Ok(())
 }
@@ -49,16 +50,12 @@ pub fn run(
     let template = cwd.join(TEMPLATE_DIR);
 
     if !template.exists() {
-        anyhow::bail!(
-            "模板目录不存在：{}\n请确认 {} 目录存在",
-            template.display(),
-            TEMPLATE_DIR
-        );
+        anyhow::bail!("{}", i18n::err_template_missing(template.display().to_string(), TEMPLATE_DIR.to_string()));
     }
 
     let mod_dir = cwd.join("mods").join(&name);
     if mod_dir.exists() {
-        anyhow::bail!("Mod 目录已存在：{}", mod_dir.display());
+        anyhow::bail!("{}", i18n::err_mod_dir_exists(mod_dir.display().to_string()));
     }
 
     let namespace = pascal_case(&name);
@@ -66,10 +63,10 @@ pub fn run(
     let desc = desc.unwrap_or_else(|| format!("{} Mod", name));
     let static_id = format!("{}.{}", author, namespace);
 
-    println!("🆕 创建新 Mod: {}", name);
-    println!("   命名空间: {}", namespace);
+    println!("🆕 {}", i18n::creating_mod(name.to_string()));
+    println!("{}", i18n::out_namespace(namespace.to_string()));
     println!("   staticID: {}", static_id);
-    println!("   版本: {}", mod_version);
+    println!("{}", i18n::out_version(mod_version.to_string()));
 
     // 1. 复制模板目录
     copy_dir_all(&template, &mod_dir)?;
@@ -78,7 +75,7 @@ pub fn run(
     let old_csproj = mod_dir.join("OniModTemplate.csproj");
     let new_csproj = mod_dir.join(format!("{}.csproj", namespace));
     if old_csproj.exists() {
-        fs::rename(&old_csproj, &new_csproj).with_context(|| format!("重命名 .csproj 失败"))?;
+        fs::rename(&old_csproj, &new_csproj).with_context(|| i18n::err_rename_csproj())?;
     }
 
     // 3. 修改 .csproj（先替换完整特定字符串，再替换通用名称）
@@ -148,16 +145,16 @@ pub fn run(
         let entry = format!("\n[mods.{}]\npath = \"mods/{}\"\n", name, name);
         let new_content = format!("{}{}", content.trim_end(), entry);
         fs::write(&config_path, new_content)
-            .with_context(|| format!("更新 {} 失败", CONFIG_FILE))?;
-        println!("   已追加到 {}", CONFIG_FILE);
+            .with_context(|| i18n::err_update_failed(CONFIG_FILE.to_string()))?;
+        println!("{}", i18n::appended_to(CONFIG_FILE.to_string()));
     }
 
-    println!("\n✅ Mod '{}' 创建成功！", name);
-    println!("   目录：{}", mod_dir.display());
+    println!("\n✅ {}", i18n::mod_created(name.to_string()));
+    println!("{}", i18n::out_directory(mod_dir.display().to_string()));
     println!();
-    println!("下一步：");
-    println!("  onim build -m {}      构建", name);
-    println!("  onim dev -m {}        开发测试", name);
+    println!("{}", i18n::init_next_steps());
+    println!("{}", i18n::next_build_mod(name.to_string()));
+    println!("{}", i18n::next_dev_mod(name.to_string()));
 
     Ok(())
 }
@@ -174,7 +171,7 @@ fn copy_dir_all(src: &PathBuf, dst: &PathBuf) -> Result<()> {
             copy_dir_all(&path, &dest)?;
         } else {
             fs::copy(&path, &dest).with_context(|| {
-                format!("复制文件失败：{} -> {}", path.display(), dest.display())
+                i18n::err_copy_file(path.display().to_string(), dest.display().to_string())
             })?;
         }
     }
