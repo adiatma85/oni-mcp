@@ -5,7 +5,7 @@
 ## Related Issues / Tasks
 
 <!-- Link any related issues or backlog tasks (e.g., Closes #123, Ref TASK-1) -->
-- Ref / Closes: 
+- Ref / Closes:
 
 ## Type of Change
 
@@ -19,9 +19,9 @@
 ## Changes Made
 
 <!-- Outline key technical changes, new tools/actions, or modifications -->
-- 
-- 
-- 
+-
+-
+-
 
 ## Verification & Testing
 
@@ -34,4 +34,4 @@
 
 - [ ] My code follows the repository's coding style and conventions.
 - [ ] I have updated relevant documentation / backlog task files.
-- [ ] No sensitive credentials (e.g., `.env`, cookies, tokens) are included.
+- [ ] No sensitive credentials (e.g. `.env`, cookies, tokens) are included.
