@@ -428,6 +428,12 @@ namespace OniMcp.Tools
                 || text.Contains("电解制氧") || (text.Contains("oxygen") && text.Contains("module")))
                 return "spom";
 
+            if (text.Contains("washroom") || text.Contains("plumbed") || text.Contains("抽水马桶") || text.Contains("水洗卫生间") || text.Contains("水洗厕所") || text.Contains("豪华厕所"))
+                return "washroom";
+
+            if (text.Contains("farm") || text.Contains("greenhouse") || text.Contains("planter") || text.Contains("农场") || text.Contains("种植室") || text.Contains("温室") || text.Contains("农业"))
+                return "farm";
+
             bool wantsToilet = text.Contains("toilet") || text.Contains("restroom") || text.Contains("latrine") || text.Contains("厕所") || text.Contains("卫生间") || text.Contains("洗手");
             bool wantsLab = text.Contains("lab") || text.Contains("research") || text.Contains("实验") || text.Contains("研究");
             if (text.Contains("starter") || text.Contains("toilet_lab") || text.Contains("toilet+lab") || text.Contains("toilet lab") || text.Contains("厕所加实验室") || text.Contains("厕所和实验室") || text.Contains("厕所实验室") || (wantsToilet && wantsLab))

@@ -91,7 +91,7 @@ namespace OniMcp.Tools
                 return "# Error\n\n" + error + "\n";
             JObject config = BuildingConfigSnapshot(go);
             JObject state = BuildingStateSnapshot(go);
-            var editable = EditableBuildingLines(config, state);
+            var editable = EditableBuildingLines(config, state, go);
             var capabilities = ((JArray)config["capabilities"] ?? new JArray()).Select(item => item.ToString())
                 .Concat(((JArray)state["controlKinds"] ?? new JArray()).Select(item => item.ToString()))
                 .Distinct().OrderBy(item => item).ToList();
@@ -120,7 +120,7 @@ namespace OniMcp.Tools
             return sb.ToString();
         }
 
-        private static SortedDictionary<string, string> EditableBuildingLines(JObject config, JObject state)
+        private static SortedDictionary<string, string> EditableBuildingLines(JObject config, JObject state, GameObject go)
         {
             var lines = new SortedDictionary<string, string>(StringComparer.Ordinal);
             AddValue(lines, "Enabled", config["enabled"]);
@@ -146,6 +146,16 @@ namespace OniMcp.Tools
             AddValue(lines, "Counter.Advanced", state["counter"]?["advancedMode"]);
             AddValue(lines, "TimeRange.Start", state["timeRange"]?["start"]);
             AddValue(lines, "TimeRange.Duration", state["timeRange"]?["duration"]);
+
+            var plot = go?.GetComponent<PlantablePlot>();
+            if (plot != null)
+            {
+                string seed = plot.requestedEntityTag.IsValid ? plot.requestedEntityTag.Name : (plot.Occupant != null ? plot.Occupant.GetComponent<KPrefabID>()?.PrefabTag.Name : "none");
+                AddValue(lines, "Plant.Seed", seed);
+                var occupantHarvest = plot.Occupant?.GetComponent<HarvestDesignatable>();
+                if (occupantHarvest != null)
+                    AddValue(lines, "Plant.AutoHarvest", occupantHarvest.HarvestWhenReady);
+            }
             return lines;
         }
 
@@ -196,7 +206,7 @@ namespace OniMcp.Tools
             }
             JObject config = BuildingConfigSnapshot(go);
             JObject state = BuildingStateSnapshot(go);
-            var current = EditableBuildingLines(config, state);
+            var current = EditableBuildingLines(config, state, go);
             if (!current.TryGetValue(key, out string currentValue))
             {
                 error = "readonly or unknown building parameter: " + key;
@@ -243,6 +253,27 @@ namespace OniMcp.Tools
                     return false;
                 }
                 request["action"] = "set_door_state"; request["state"] = stateValue; return true;
+            }
+            if (key == "Plant.Seed")
+            {
+                request["domain"] = "receptacle";
+                request["action"] = "request";
+                request["entityTag"] = value.Trim().ToLowerInvariant() == "none" ? "" : value.Trim();
+                request["confirm"] = true;
+                return true;
+            }
+            if (key == "Plant.AutoHarvest")
+            {
+                if (!bool.TryParse(value, out bool autoHarvest))
+                {
+                    error = "Plant.AutoHarvest must be true or false";
+                    return false;
+                }
+                request["domain"] = "farming";
+                request["action"] = "set_autoharvest";
+                request["autoHarvest"] = autoHarvest;
+                request["confirm"] = true;
+                return true;
             }
             if (key == "Capacity") return SetStateFloatRequest(request, "capacity", "capacity", value, out error);
             if (key == "Checkbox") return SetStateBoolRequest(request, "checkbox", "value", value, out error);

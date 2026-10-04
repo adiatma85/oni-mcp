@@ -66,7 +66,11 @@ namespace OniMcp.Tools
                         case "move":
                             return MoveCamera().Handler(args);
                         case "switch_view":
+                        case "set_overlay":
+                        case "switch_overlay":
+                        case "set_view_overlay":
                         case "overlay":
+                        case "set_mode":
                             return SwitchView().Handler(args);
                         case "focus_cell":
                             return FocusCell().Handler(args);

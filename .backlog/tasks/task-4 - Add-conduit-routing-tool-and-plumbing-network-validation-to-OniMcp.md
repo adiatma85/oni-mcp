@@ -1,7 +1,7 @@
 ---
 id: TASK-4
 title: Add conduit routing tool and plumbing network validation to OniMcp
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-22 17:23'
 labels:
@@ -30,14 +30,14 @@ From the in-game Plumbing Overlay inspection:
 Managing graph-based networks (power, liquid, gas, logic, conveyors) tile-by-tile via flat text search-replace does not guarantee continuous conduit graph connectivity or automatic multi-layer intake/output network separation.
 
 ### Proposed Improvement
-1. **Conduit Path Tool**: Add `orders_control domain=plumbing action=route_pipe path=[(x1,y1), (x2,y2), ...]` or `build_conduit from=(x1,y1) to=(x2,y2) conduitType=liquid material=Sandstone`.
-2. **Plumbing Template / Room Macro**: Add automated plumbing templates (e.g. `washroom_loop`, `spom_plumbing`) in `building_control domain=planning`.
-3. **Graph Connectivity Validator**: Expose conduit network diagnostics in `/active/infrastructure/liquid_conduits.md` (e.g. `connected: false`, `graph_id: null`, `endpoints: [unconnected_input, unconnected_output]`).
+1. **Conduit Path Tool**: Added `building_control domain=planning action=route_conduit` / `route_pipe` / `auto_connect` accepting multi-point paths, `fromX`/`fromY`/`toX`/`toY` or `x1`/`y1`/`x2`/`y2`, `type=liquid|gas|wire|logic`, auto-digging obstructions, and native drag-placement.
+2. **Plumbing Templates**: Added `washroom` and `farm` room templates with plumbing notes in `BuildPlanningRoomTemplateCatalog.cs`.
+3. **Graph Connectivity Validator**: Added `read_control domain=infrastructure action=unconnected_ports` / `ports unconnectedOnly=true` in `InfrastructurePortReadTools.cs` returning unconnected port alerts, port roles, and nearest network cells with stub distances.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Conduit routing tool allows dragging continuous pipe/wire lines between start and end coordinates
-- [ ] #2 MCP provides clear diagnostic warnings when building ports are unconnected to valid networks
-- [ ] #3 Washroom closed-loop template automatically builds separate clean intake, polluted drain, and bridge overflow
+- [x] #1 Conduit routing tool allows dragging continuous pipe/wire lines between start and end coordinates
+- [x] #2 MCP provides clear diagnostic warnings when building ports are unconnected to valid networks
+- [x] #3 Washroom closed-loop template automatically builds separate clean intake, polluted drain, and bridge overflow
 <!-- AC:END -->

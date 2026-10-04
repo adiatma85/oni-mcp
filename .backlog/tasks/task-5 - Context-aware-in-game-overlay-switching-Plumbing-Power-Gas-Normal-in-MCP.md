@@ -1,7 +1,7 @@
 ---
 id: TASK-5
 title: 'Context-aware in-game overlay switching (Plumbing, Power, Gas, Normal) in MCP'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-22 17:25'
 labels:
@@ -36,7 +36,7 @@ The player/viewer observed that the in-game camera frequently stays on the Tempe
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 MCP camera/overlay tool supports setting in-game overlay mode (liquid, power, gas, normal, etc.)
-- [ ] #2 Infrastructure tool actions automatically sync the corresponding in-game overlay during active editing
-- [ ] #3 Game reverts to Default/Normal overlay when regular simulation resumes
+- [x] #1 MCP camera/overlay tool supports setting in-game overlay mode (liquid, power, gas, normal, etc.)
+- [x] #2 Infrastructure tool actions automatically sync the corresponding in-game overlay during active editing
+- [x] #3 Game reverts to Default/Normal overlay when regular simulation resumes
 <!-- AC:END -->

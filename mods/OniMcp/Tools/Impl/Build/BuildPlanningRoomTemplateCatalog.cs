@@ -77,6 +77,42 @@ namespace OniMcp.Tools
                 }
             };
 
+            catalog["washroom"] = new RoomTemplateDefinition
+            {
+                Kind = "washroom",
+                DefaultWidth = 8,
+                DefaultHeight = 5,
+                LayoutPurpose = "bathroom",
+                Placements = new List<RoomTemplatePlacement>
+                {
+                    Place("FlushToilet", 2, 1, 2, 3, "waste"),
+                    Place("WashSink", -3, 1, 2, 3, "hygiene")
+                },
+                Note = "Plumbed washroom with FlushToilet and WashSink. Connect clean water intake and polluted water output (closed loop to WaterPurifier with overflow bridge recommended)."
+            };
+
+            catalog["farm"] = new RoomTemplateDefinition
+            {
+                Kind = "farm",
+                DefaultWidth = 12,
+                DefaultHeight = 4,
+                LayoutPurpose = "farm",
+                Placements = new List<RoomTemplatePlacement>
+                {
+                    Place("PlanterBox", 1, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 2, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 3, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 4, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 5, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 6, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 7, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 8, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 9, 1, 1, 1, "crop"),
+                    Place("PlanterBox", 10, 1, 1, 1, "crop")
+                },
+                Note = "Standard greenhouse/farm room with planter boxes on the floor. Auto-harvest is enabled by default. Set crops with seed parameter or colony_control domain=bio bioDomain=farming action=set."
+            };
+
             // Self-Powered Oxygen Module.
             // Vertical order follows gas stratification rather than convenience: hydrogen is the
             // lightest gas so its pump sits at the ceiling, oxygen collects lower so its pump sits

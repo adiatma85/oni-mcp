@@ -1,7 +1,7 @@
 ---
 id: TASK-3
 title: 'Auto-connect utility ports (power, liquid, gas) on building placement in MCP'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-22 17:16'
 labels:
@@ -25,12 +25,12 @@ When buildings with utility requirements (e.g. Water Sieve consuming 120W power,
 - An autonomous agent or player using MCP must manually issue separate edits to `/active/infrastructure/power.md`, `/active/infrastructure/liquid_conduits.md`, and `/active/infrastructure/gas_conduits.md` just to link a 1-tile port stub to a passing main line.
 
 ### Proposed Improvement
-1. Add an `autoConnect: true` flag or action in `building_control domain=planning action=auto_connect_ports` that automatically extends power wires, liquid pipes, or gas pipes by 1–2 tiles to connect building ports to the nearest compatible network.
-2. Include port coordinates, port kinds (intake/output/power), and connection status directly in building placement previews and `/active/buildings/instances/<id>.md` files.
+1. Add `building_control domain=planning action=auto_connect` (and aliases `route_conduit`, `route_pipe`, `route_wire`) supporting power wires, liquid conduits, and gas conduits with multi-point paths, coordinate aliases (`x1`/`y1`/`x2`/`y2`), and auto-nearest conduit searching.
+2. In `read_control domain=infrastructure action=unconnected_ports` / `ports unconnectedOnly=true`, highlight unconnected ports and provide exact suggested stub network cells and distances.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 MCP provides a tool/flag to automatically connect building utility ports to adjacent networks
-- [ ] #2 Building placement previews highlight unconnected ports and suggested stub coordinates
+- [x] #1 MCP provides a tool/flag to automatically connect building utility ports to adjacent networks
+- [x] #2 Building placement previews highlight unconnected ports and suggested stub coordinates
 <!-- AC:END -->

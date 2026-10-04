@@ -15,10 +15,10 @@ namespace OniMcp.Tools
             var points = ParsePathPoints(args["points"]);
             if (points.Count == 0)
             {
-                int? fromX = ToolUtil.GetInt(args, "fromX");
-                int? fromY = ToolUtil.GetInt(args, "fromY");
-                int? toX = ToolUtil.GetInt(args, "toX");
-                int? toY = ToolUtil.GetInt(args, "toY");
+                int? fromX = ToolUtil.GetInt(args, "fromX") ?? ToolUtil.GetInt(args, "x1") ?? ToolUtil.GetInt(args, "startX");
+                int? fromY = ToolUtil.GetInt(args, "fromY") ?? ToolUtil.GetInt(args, "y1") ?? ToolUtil.GetInt(args, "startY");
+                int? toX = ToolUtil.GetInt(args, "toX") ?? ToolUtil.GetInt(args, "x2") ?? ToolUtil.GetInt(args, "endX");
+                int? toY = ToolUtil.GetInt(args, "toY") ?? ToolUtil.GetInt(args, "y2") ?? ToolUtil.GetInt(args, "endY");
                 if (!fromX.HasValue || !fromY.HasValue || !toX.HasValue || !toY.HasValue)
                 {
                     if (!TryResolveAutoUtilityEndpoints(args, out points, out error))
@@ -43,50 +43,140 @@ namespace OniMcp.Tools
             }
             return path;
         }
+
         private static bool TryResolveAutoUtilityEndpoints(JObject args, out List<CellCoord> points, out string error)
         {
             points = new List<CellCoord>();
             error = null;
             string prefabId = args["prefabId"]?.ToString();
-            if (!string.IsNullOrWhiteSpace(prefabId) && prefabId.IndexOf("Wire", StringComparison.OrdinalIgnoreCase) < 0)
-            {
-                error = "Provide either points or fromX/fromY/toX/toY for non-wire utility auto_connect";
-                return false;
-            }
+            string type = (args["type"]?.ToString() ?? string.Empty).ToLowerInvariant();
             int worldId = ToolUtil.ResolveWorldId(args);
+            int radius = ToolUtil.GetInt(args, "maxAutoConnectRadius") ?? 80;
+
+            int? targetX = ToolUtil.GetInt(args, "x") ?? ToolUtil.GetInt(args, "toX") ?? ToolUtil.GetInt(args, "targetX");
+            int? targetY = ToolUtil.GetInt(args, "y") ?? ToolUtil.GetInt(args, "toY") ?? ToolUtil.GetInt(args, "targetY");
             string toQuery = FirstNonEmpty(args["toQuery"], args["targetQuery"], args["query"], args["target"], args["search"], args["name"]);
-            if (string.IsNullOrWhiteSpace(toQuery))
+
+            int toCell = Grid.InvalidCell;
+            if (targetX.HasValue && targetY.HasValue)
             {
-                error = "Provide points, fromX/fromY/toX/toY, or query/toQuery for one-call wire auto_connect";
+                toCell = Grid.XYToCell(targetX.Value, targetY.Value);
+            }
+            else if (!string.IsNullOrWhiteSpace(toQuery))
+            {
+                string toError;
+                if (!TryResolvePowerEndpointCell(toQuery, worldId, preferOutput: false, out toCell, out toError))
+                {
+                    var match = Components.BuildingCompletes.Items.FirstOrDefault(b => b != null && ToolUtil.GameObjectMatchesWorld(b.gameObject, worldId)
+                        && (SimpleMatchScore(b.Def?.PrefabID, toQuery) > 0 || SimpleMatchScore(ToolUtil.CleanName(b.gameObject.GetProperName()), toQuery) > 0));
+                    if (match != null)
+                    {
+                        toCell = Grid.PosToCell(match.gameObject);
+                    }
+                    else
+                    {
+                        error = toError ?? $"No target building matching '{toQuery}'";
+                        return false;
+                    }
+                }
+            }
+
+            if (!Grid.IsValidCell(toCell))
+            {
+                error = "Provide points, fromX/fromY/toX/toY, x/y, or query/toQuery for auto_connect";
                 return false;
             }
-            int toCell;
-            string toError;
-            if (!TryResolvePowerEndpointCell(toQuery, worldId, preferOutput: false, out toCell, out toError))
-            {
-                error = toError;
-                return false;
-            }
-            int fromCell;
+
+            int fromCell = Grid.InvalidCell;
             string fromQuery = FirstNonEmpty(args["fromQuery"], args["sourceQuery"], args["source"], args["from"]);
             if (!string.IsNullOrWhiteSpace(fromQuery))
             {
                 string fromError;
                 if (!TryResolvePowerEndpointCell(fromQuery, worldId, preferOutput: true, out fromCell, out fromError))
                 {
-                    error = fromError;
-                    return false;
+                    var match = Components.BuildingCompletes.Items.FirstOrDefault(b => b != null && ToolUtil.GameObjectMatchesWorld(b.gameObject, worldId)
+                        && (SimpleMatchScore(b.Def?.PrefabID, fromQuery) > 0 || SimpleMatchScore(ToolUtil.CleanName(b.gameObject.GetProperName()), fromQuery) > 0));
+                    if (match != null)
+                    {
+                        fromCell = Grid.PosToCell(match.gameObject);
+                    }
+                    else
+                    {
+                        error = fromError ?? $"No source building matching '{fromQuery}'";
+                        return false;
+                    }
                 }
             }
-            else if (!TryFindNearestWireOrPowerOutput(toCell, worldId, ToolUtil.GetInt(args, "maxAutoConnectRadius") ?? 80, out fromCell))
+            else
             {
-                error = $"No connected power output found near '{toQuery}'. Provide fromQuery/fromX/fromY for a powered source.";
-                return false;
+                if (type == "liquid" || (!string.IsNullOrEmpty(prefabId) && prefabId.IndexOf("Liquid", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    if (!TryFindNearestUtilityConduit(toCell, worldId, "liquid", radius, out fromCell))
+                    {
+                        error = $"No liquid conduit found within radius {radius} around ({Grid.CellColumn(toCell)},{Grid.CellRow(toCell)}).";
+                        return false;
+                    }
+                }
+                else if (type == "gas" || (!string.IsNullOrEmpty(prefabId) && prefabId.IndexOf("Gas", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    if (!TryFindNearestUtilityConduit(toCell, worldId, "gas", radius, out fromCell))
+                    {
+                        error = $"No gas conduit found within radius {radius} around ({Grid.CellColumn(toCell)},{Grid.CellRow(toCell)}).";
+                        return false;
+                    }
+                }
+                else
+                {
+                    if (!TryFindNearestWireOrPowerOutput(toCell, worldId, radius, out fromCell))
+                    {
+                        error = $"No connected power output or wire found within radius {radius} around ({Grid.CellColumn(toCell)},{Grid.CellRow(toCell)}).";
+                        return false;
+                    }
+                }
             }
 
             points.Add(CellCoordFromCell(fromCell));
             points.Add(CellCoordFromCell(toCell));
             return true;
+        }
+
+        private static bool TryFindNearestUtilityConduit(int targetCell, int worldId, string layerType, int radius, out int cell)
+        {
+            cell = Grid.InvalidCell;
+            if (!Grid.IsValidCell(targetCell))
+                return false;
+
+            radius = Math.Max(1, Math.Min(radius, 200));
+            int targetX = Grid.CellColumn(targetCell);
+            int targetY = Grid.CellRow(targetCell);
+            int bestDistance = int.MaxValue;
+            var layers = layerType == "gas" ? UtilityLayersForPrefab("GasConduit") : UtilityLayersForPrefab("LiquidConduit");
+
+            foreach (var layer in layers)
+            {
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    for (int dy = -radius; dy <= radius; dy++)
+                    {
+                        int distance = Math.Abs(dx) + Math.Abs(dy);
+                        if (distance == 0 || distance > radius || distance >= bestDistance)
+                            continue;
+
+                        int candidate = Grid.XYToCell(targetX + dx, targetY + dy);
+                        if (!Grid.IsValidCell(candidate) || !ToolUtil.CellMatchesWorld(candidate, worldId))
+                            continue;
+
+                        var conduit = Grid.Objects[candidate, (int)layer];
+                        if (conduit == null)
+                            continue;
+
+                        bestDistance = distance;
+                        cell = candidate;
+                    }
+                }
+            }
+
+            return Grid.IsValidCell(cell);
         }
 
         private static bool TryResolvePowerEndpointCell(string query, int worldId, bool preferOutput, out int cell, out string error)

@@ -120,7 +120,7 @@ return WorldAnalysisTools.ReadWorldControl().Handler(args);
                 case "resources":
                     return InventoryTools.ControlResources().Handler(args);
                 case "infrastructure":
-                    if (action == "ports" || action == "utility_ports" || action == "all_ports" || action == "nearby_ports" || action == "ports_nearby")
+                    if (action == "ports" || action == "utility_ports" || action == "all_ports" || action == "nearby_ports" || action == "ports_nearby" || action == "unconnected_ports" || action == "unconnected")
                         return InfrastructurePortReadTools.ReadPorts(args);
                     return PowerAndRoomTools.InfrastructureReadControl().Handler(args);
                 case "knowledge":

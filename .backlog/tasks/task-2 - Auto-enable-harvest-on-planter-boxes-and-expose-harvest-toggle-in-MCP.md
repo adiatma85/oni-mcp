@@ -1,7 +1,7 @@
 ---
 id: TASK-2
 title: Auto-enable harvest on planter boxes and expose harvest toggle in MCP
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-22 17:05'
 labels:
@@ -25,11 +25,11 @@ Some Planter Boxes or farm plants display the status/warning 'No Harvest Pending
 
 ### Proposed Improvement
 1. Ensure farm planning actions automatically set `autoHarvest=true` on food crops.
-2. Expose `orders_control domain=farming action=toggle_autoharvest` to easily toggle harvest policies across rectangular areas.
+2. Expose `colony_control domain=bio bioDomain=farming action=set_autoharvest` / `toggle_autoharvest` to easily toggle harvest policies across rectangular areas or buildings.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Farm planning blueprints default to auto-harvest enabled
-- [ ] #2 MCP provides clear diagnostic info distinguishing 'Growing', 'Harvest Pending', and 'Auto-Harvest Disabled'
+- [x] #1 Farm planning blueprints default to auto-harvest enabled
+- [x] #2 MCP provides clear diagnostic info distinguishing 'Growing', 'Harvest Pending', and 'Auto-Harvest Disabled'
 <!-- AC:END -->
