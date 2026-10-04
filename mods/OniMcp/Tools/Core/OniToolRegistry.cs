@@ -28,8 +28,7 @@ namespace OniMcp.Tools
         };
         private static bool _initialized;
         private static readonly OniToolRegistryCache ToolCache = new OniToolRegistryCache();
-        private static List<McpToolInfo> _cachedCoreToolInfos;
-        private static List<McpToolInfo> _cachedAllToolInfos;
+        private static List<McpToolInfo> _cachedCoreToolInfos, _cachedAllToolInfos;
 
         /// <summary>
         /// 初始化所有工具
@@ -37,7 +36,6 @@ namespace OniMcp.Tools
         public static void Initialize()
         {
             if (_initialized) return;
-            _initialized = true;
 
             Register(CoreToolEnglishDescriptions.Apply(ServerControlEntryTools.ControlServer()));
             Register(CoreToolEnglishDescriptions.Apply(WorldEditorTools.ControlWorldEditor()));
@@ -52,6 +50,7 @@ namespace OniMcp.Tools
             RegisterInternal(SearchControlTools.ControlSearch());
             RegisterInternal(CoordinateControlTools.ControlCoordinate());
             BuildToolInfoCache();
+            _initialized = true;
         }
 
         private static void Register(McpTool tool)
@@ -77,6 +76,9 @@ namespace OniMcp.Tools
 
         internal static bool TryGetOperation(string name, out McpTool operation)
         {
+            operation = null;
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
             return TryGetTool(name, out operation) || _internalOperations.TryGetValue(name, out operation);
         }
 
@@ -110,12 +112,12 @@ namespace OniMcp.Tools
         {
             var cached = includeAll ? _cachedAllToolInfos : _cachedCoreToolInfos;
             if (cached != null)
-                return cached;
+                return new List<McpToolInfo>(cached);
 
             BuildToolInfoCache();
             cached = includeAll ? _cachedAllToolInfos : _cachedCoreToolInfos;
             if (cached != null)
-                return cached;
+                return new List<McpToolInfo>(cached);
 
             return BuildToolInfos(includeAll);
         }
@@ -151,7 +153,8 @@ namespace OniMcp.Tools
                         {
                             Type = param.Value.Type,
                             Description = param.Value.Description,
-                            Enum = param.Value.SchemaEnumValues
+                            Enum = param.Value.SchemaEnumValues,
+                            McpHeader = param.Value.McpHeader
                         };
                         if (param.Value.Required)
                             required.Add(param.Key);
@@ -214,6 +217,8 @@ namespace OniMcp.Tools
 
         internal static CallToolResult CallToolFromWorldEditor(string name, JObject arguments, bool allowValidatedCoordinates)
         {
+            if (string.IsNullOrWhiteSpace(name))
+                return CallToolResult.Error("Operation name is required.");
             if (_tools.ContainsKey(name) || _aliases.ContainsKey(name))
                 return CallToolCore(name, arguments, allowValidatedCoordinates);
             if (!_internalOperations.TryGetValue(name, out var operation))
@@ -247,6 +252,8 @@ namespace OniMcp.Tools
         private static CallToolResult CallToolCore(string name, JObject arguments, bool allowValidatedCoordinates)
         {
             var middlewareNotifications = ToolCallMiddleware.DrainNotifications();
+            if (string.IsNullOrWhiteSpace(name))
+                return ToolCallMiddleware.Inject(CallToolResult.Error("Tool name is required."), middlewareNotifications);
             bool usedLegacyAlias = false;
             if (!_tools.TryGetValue(name, out var tool))
             {
@@ -366,6 +373,7 @@ namespace OniMcp.Tools
         public string Description { get; set; }
         public bool Required { get; set; }
         public List<string> EnumValues { get; set; }
+        public string McpHeader { get; set; }
 
         public List<object> SchemaEnumValues
         {
@@ -452,8 +460,6 @@ namespace OniMcp.Tools
             });
             return result;
         }
-
-
         private static string InferGroup(string name)
         {
             name = (name ?? "").ToLowerInvariant();

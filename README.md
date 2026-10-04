@@ -30,7 +30,7 @@ A large-scale modular repository for Oxygen Not Included mod development:
 
 > **Compatibility warning**: before `1.0.0`, the `OniMcp` API can still introduce breaking changes. If you build derivatives, plugins, scripts, or third-party clients, pin exact versions and use runtime manifests (e.g. `oni://tools/manifest`) as the compatibility source of truth.
 
-> **AI infrastructure & open-source support:** OniMcp development and agent testing consume model API credits. If you need an OpenAI-compatible endpoint for your MCP client, [LMM API Gateway](https://api.lmm.best) is one available option. LMM is maintained by the OniMods author; purchases help fund this work, while substantive issues, pull requests, and testing may receive API credits. OniMods remains open source and does not require this provider.
+> **AI infrastructure & open-source support:** OniMcp development and agent testing consume model API credits. If you need an OpenAI-compatible endpoint for your MCP client, [LMM API Gateway](https://api.lmm.best) is one available option. Its [source code](https://github.com/TokenNotIncluded/api.lmm.best) is hosted by [TokenNotIncluded](https://github.com/TokenNotIncluded). Purchases help fund this work, while substantive issues, pull requests, and testing may receive API credits. OniMods remains open source and does not require this provider.
 
 ## Table of Contents
 
@@ -59,7 +59,7 @@ The repository is organized as a **two-part platform**:
 ## Supported Modules
 
 | Module | Path | Scope |
-|---|---|---|
+| --- | --- | --- |
 | `onim` | [src/](src/) | Rust CLI for mod lifecycle management |
 | `OniMcp` | [mods/OniMcp/](mods/OniMcp/) | ONI MCP server mod and tool surface |
 | `CycleTrim` | [mods/CycleTrim/](mods/CycleTrim/) | Lightweight performance mod targeting measured simulation hot paths |
@@ -95,6 +95,10 @@ onim dev -m MyMod
 
 ## ONI MCP Server
 
+Support OniMcp development and testing: [Donate](https://donate.lmm.best/?project=onimcp).
+
+[![OniMcp donation progress](https://donate.lmm.best/badge.svg?project=onimcp&currency=CNY&lang=en&period=all&layout=compact&theme=dark&width=360&title=OniMCP)](https://donate.lmm.best/?project=onimcp)
+
 `OniMcp` is designed as a **safe, MCP-native operations layer** for Oxygen Not Included:
 
 - **`world_editor`**: world-like text file editing workflow; apply SEARCH/REPLACE style edits to virtual save artifacts
@@ -122,6 +126,8 @@ See the full runtime docs in [mods/OniMcp/README_EN.md](mods/OniMcp/README_EN.md
 2. Scaffold mod with `onim init`
 3. Iterate quickly via `onim dev -m <mod>`
 4. Build/publish through `onim build` and `onim publish`
+
+CycleTrim and OniMcp use the locked, headless workflow in [docs/steam-publishing.md](docs/steam-publishing.md).
 
 ## Repository Layout
 
@@ -185,7 +191,7 @@ cp Directory.Build.props.example Directory.Build.props
 ## Command Reference
 
 | Command | Purpose |
-|---|---|
+| --- | --- |
 | `onim setup` | initialize config and discover dependencies |
 | `onim doctor` | read-only health check for paths, tools, and configured mod sources |
 | `onim init <name>` | scaffold from template |
@@ -196,7 +202,7 @@ cp Directory.Build.props.example Directory.Build.props
 | `onim install` | release build + install to `mods/Local` |
 | `onim uninstall` | uninstall `dev/local/all` scoped mods |
 | `onim info` | show installed Dev/Local/Steam modules |
-| `onim publish` | publish to Steam Workshop |
+| `onim publish` | publish to Steam Workshop; supports `--non-interactive` and `--dry-run` |
 | `onim list` | list known mods in config |
 
 ## CLI Language
@@ -238,6 +244,10 @@ ONIM_LANG=zh onim doctor    # Chinese for one command
 2. Keep PRs focused to one coherent change
 3. Add/update docs/changelog links when behavior changes
 4. Confirm local workflow (`onim setup`, relevant verify scripts) before merging
+
+Run `python3 scripts/check_mods.py` with Python 3 and .NET SDK 10 for the Mod
+regression suite. See [Mod testing](docs/mod-testing.md) for coverage and the
+additional checks that require an installed game.
 
 ## Dependencies
 

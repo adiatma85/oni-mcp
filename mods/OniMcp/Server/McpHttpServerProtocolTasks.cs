@@ -1,15 +1,7 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Net;
-using System.Text;
-using System.Threading;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using OniMcp.Config;
 using OniMcp.Core;
-using OniMcp.Support;
 using OniMcp.Tools;
 using UnityEngine;
 
@@ -74,6 +66,8 @@ namespace OniMcp.Server
         private const string CurrentProtocolVersion = "2025-11-25";
 
         private const string LegacyProtocolVersion = "2025-06-18";
+
+        private const int LegacyResourceNotFoundErrorCode = -32002;
 
         private static readonly string[] SupportedProtocolVersions = { CurrentProtocolVersion, LegacyProtocolVersion };
 
@@ -141,7 +135,7 @@ namespace OniMcp.Server
                 ServerInfo = new Implementation
                 {
                     Name = "OniMcp",
-                    Version = "0.2.0"
+                    Version = ServerVersion
                 }
             };
         }
@@ -154,7 +148,8 @@ namespace OniMcp.Server
 
             var result = OniResourceRegistry.ReadResource(@params.Uri);
             if (result == null)
-                return JsonRpcResponse.MakeError(request.Id, McpErrorCode.InvalidParams, $"Resource not found: {@params.Uri}");
+                return JsonRpcResponse.MakeError(request.Id, LegacyResourceNotFoundErrorCode,
+                    $"Resource not found: {@params.Uri}");
 
             return result;
         }
@@ -167,6 +162,7 @@ namespace OniMcp.Server
                 return new ListTasksResult
                 {
                     Tasks = _tasks.Values
+                        .Where(task => string.Equals(task.SessionId, CurrentSessionId, StringComparison.Ordinal))
                         .OrderByDescending(task => task.CreatedAt)
                         .Select(task => task.ToInfo())
                         .ToList()
@@ -232,7 +228,8 @@ namespace OniMcp.Server
             {
                 CleanupExpiredTasks();
                 McpTaskEntry task;
-                if (!_tasks.TryGetValue(@params.TaskId, out task))
+                if (!_tasks.TryGetValue(@params.TaskId, out task)
+                    || !string.Equals(task.SessionId, CurrentSessionId, StringComparison.Ordinal))
                 {
                     error = JsonRpcResponse.MakeError(request.Id, McpErrorCode.InvalidParams, $"Task not found: {@params.TaskId}");
                     return null;
@@ -246,6 +243,7 @@ namespace OniMcp.Server
             var task = new McpTaskEntry
             {
                 TaskId = Guid.NewGuid().ToString("N"),
+                SessionId = sessionId,
                 Status = "working",
                 StatusMessage = string.IsNullOrEmpty(callParams.Task.Title) ? $"Calling tool {callParams.Name}" : callParams.Task.Title,
                 CreatedAt = System.DateTime.UtcNow,
@@ -256,10 +254,15 @@ namespace OniMcp.Server
                 TtlMilliseconds = NormalizeTaskTtl(callParams.Task.Ttl)
             };
 
-            lock (_taskLock)
+            lock (_sessionLock)
             {
-                CleanupExpiredTasks();
-                _tasks[task.TaskId] = task;
+                if (!_running || !_sessions.ContainsKey(sessionId))
+                    throw new InvalidOperationException("Session not found or terminated");
+                lock (_taskLock)
+                {
+                    CleanupExpiredTasks();
+                    _tasks[task.TaskId] = task;
+                }
             }
 
             ExecuteToolTask(task.TaskId, callParams.Name, callParams.Arguments, sessionId);
@@ -268,8 +271,11 @@ namespace OniMcp.Server
 
         private void ExecuteToolTask(string taskId, string toolName, JObject arguments, string sessionId)
         {
+            int contextGeneration = GameContextLifecycle.CaptureGeneration();
             MainThreadBridge.EnqueueDeferred(new System.Action(() =>
             {
+                if (!_running || !IsSessionActive(sessionId))
+                    return;
                 McpTaskEntry task;
                 lock (_taskLock)
                 {
@@ -282,6 +288,22 @@ namespace OniMcp.Server
 
                 try
                 {
+                    string contextError = GameContextLifecycle.RejectionReason(contextGeneration);
+                    if (contextError != null)
+                    {
+                        lock (_taskLock)
+                        {
+                            if (!task.CancelRequested)
+                            {
+                                task.Status = "failed";
+                                task.StatusMessage = "Game context changed; retry tool call";
+                                task.Error = contextError + " (retryable)";
+                                task.LastUpdatedAt = System.DateTime.UtcNow;
+                            }
+                        }
+                        return;
+                    }
+
                     CallToolResult result;
                     using (PushSessionContext(sessionId))
                     {

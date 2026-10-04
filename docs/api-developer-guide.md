@@ -50,9 +50,40 @@ Claude Desktop / Cursor 的示例配置:
 }
 ```
 
-### 3. 协议握手
+### 3. 协议协商
 
-第一个请求必须是 `initialize`:
+OniMcp 同时保留两个协议时代。新客户端优先尝试 MCP `2026-07-28` 的无会话路径；旧客户端继续使用 `2025-11-25` / `2025-06-18` 的 `initialize` + `Mcp-Session-Id` 路径。
+
+#### MCP 2026-07-28：无会话发现
+
+现代请求不执行 `initialize`，也不创建、要求或返回 `Mcp-Session-Id`。每个请求自行携带协议元数据，并通过 HTTP headers 声明方法；需要资源名或工具名时还要发送匹配的 `Mcp-Name`。
+
+推荐先调用 `server/discover`：
+
+```bash
+curl -sS -X POST http://localhost:8788/mcp/ \
+  -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: server/discover' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "server/discover",
+    "params": {
+      "_meta": {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": { "name": "cli", "version": "1.0" }
+      }
+    }
+  }'
+```
+
+当前现代路径刻意保持较小：支持 `server/discover`、`resources/list`、`resources/templates/list`、`resources/read`，以及只读 `benchmark` 的 `tools/list` / `tools/call`。它不会广告 2025 core Tasks、MRTR、订阅或会修改游戏状态的工具。调用方应以 `server/discover` 返回的 capability 和 `tools/list` 为准，不要假设旧版完整工具面在现代路径可用。
+
+#### MCP 2025：legacy initialize/session
+
+需要完整现有游戏控制工具面的旧客户端继续使用初始化握手：
 
 ```bash
 curl -sS -X POST http://localhost:8788/mcp/ \
@@ -70,7 +101,7 @@ curl -sS -X POST http://localhost:8788/mcp/ \
   }'
 ```
 
-服务端响应头会包含 `Mcp-Session-Id`。后续请求必须携带:
+服务端响应头会包含 `Mcp-Session-Id`。之后的 legacy 请求必须携带：
 
 ```text
 Mcp-Session-Id: <session id>
@@ -91,33 +122,27 @@ Default public surface: compact aggregate tools:
 
 | Tool | Purpose |
 |------|---------|
-| `world_editor` | Filesystem-style world editor. Supports read/search and SEARCH/REPLACE edits over virtual save/world files, including typed operation files under `/active/ops/`. |
-| `colony_control` | Colony-wide snapshots, diagnostics, survival plans, notifications, reports, and management. |
+| `benchmark` | Read-only protocol benchmark. The modern `2026-07-28` path currently exposes this as its only tool. |
+| `building_control` | Building planning, materials, configuration, storage, filters, production, side screens, and rockets. |
+| `game_control` | Pause, speed, saves, sandbox, and UI operations. |
+| `navigation_control` | Camera movement, world switching, overlays, focus, and screenshots. |
+| `orders_control` | Area orders, priorities, designation changes, and conduit/wire cuts. |
 | `server_control` | MCP diagnostics, catalog, batch calls, resources, and server operations. |
+| `world_editor` | Filesystem-style world editor. Supports read/search and SEARCH/REPLACE edits over virtual save/world files, including typed operation files under `/active/ops/`. |
 
-The `read_control`, `building_control`, `orders_control`, `dupes_control`, `game_control`, `navigation_control`, and `search_control` are aggregate entrypoints for normal play. `coordinate_control` is not part of the current public runtime; ordinary aggregate tools reject raw coordinates.
+Internal virtual-file operations are not direct MCP tools:
 
-Legacy public surface before `world_editor` consolidation:
+- `colony_control`, `coordinate_control`, `dupes_control`, `read_control`, and `search_control` are registered only for validated `world_editor` virtual-file routing.
+- Do not send those names as `tools/call params.name`. Use `world_editor`, structured resources, or one of the public aggregate tools above.
+- Exact orders read `/active/ops/tools.md` and edit the matching typed operation file. Raw-coordinate compatibility entries remain internal and are not a public client surface.
 
-| 工具 | 用途 |
-|------|------|
-| `server_control` | 服务、目录、工具搜索、批量、agent program |
-| `read_control` | 世界、区域、资源、建筑、机制知识、基础设施摘要 |
-| `search_control` | Dedicated search for tools, world objects, resources, buildings, dupes, and knowledge with action-ready `nextActions` |
-| `game_control` | 暂停、调速、存档、沙盒、UI |
-| `navigation_control` | 相机移动、世界切换、覆盖层、聚焦和截图 |
-| `building_control` | 建造规划、材料、配置、储存、过滤、生产、侧屏、火箭 |
-| `orders_control` | 区域订单、优先级、指定/取消、剪断 |
-| `dupes_control` | 复制人状态、命令、优先级、改名、技能、分配 |
-| `colony_control` | 快照、报告、诊断、通知、管理、农牧 |
-
-Legacy fine-grained implementations are internal compatibility only. New integrations should prefer the public aggregate entrypoints from `tools/list`.
+New integrations should discover the public aggregate entrypoints from `tools/list` instead of hard-coding historical internal operation names.
 
 ## 参数设计约定
 
 新工具面采用搜索/动作优先:
 
-- Prefer `search_control` for discovery. It returns `searchResult`, `nextActions`, and `searchActionPatch`, so selected results can be passed directly into action tools like a search/replace edit.
+- Use `world_editor command=search` for world/building discovery and `server_control domain=catalog action=search` for tool discovery. Internal `search_control` is a virtual-file implementation detail, not a direct client tool.
 - 优先传 `query`、`target`、`search`、`name`、`id`、`areaId`。
 - Public tools do not accept raw `x/y`, `x1/y1/x2/y2`, `dx/dy`, `points`, or `anchors`. Exact orders read `/active/ops/tools.md` and edit `/active/ops/orders.md`; select only current public typed files/tools and ignore hidden `coordinate_control` and `/active/ops/coordinate.md` compatibility entries.
 - 写入和执行动作应支持 `dryRun` 或 `confirm`。
@@ -125,9 +150,11 @@ Legacy fine-grained implementations are internal compatibility only. New integra
 - 面向任务的结果应返回 `reachable`、`executable`、失败原因、缺失条件和建议下一步。
 - 建造相关结果应返回材料可行性，至少说明需要材料、可用材料和缺口。
 
+当前 legacy 公开工具的 `tools/call` 都要求 `arguments.task` 是非空字符串，用来描述这次调用的用户任务；缺失或空值会在工具分派前被拒绝。
+
 ## 调用示例
 
-### 列出工具
+### 列出工具（legacy 2025 会话路径）
 
 ```bash
 curl -sS -X POST http://localhost:8788/mcp/ \
@@ -142,6 +169,8 @@ curl -sS -X POST http://localhost:8788/mcp/ \
   }'
 ```
 
+现代 `2026-07-28` 客户端不要发送 `Mcp-Session-Id`；应按上面的无会话规则携带 `_meta`、`MCP-Protocol-Version` 和 `Mcp-Method`。当前现代 `tools/list` 只广告只读 `benchmark`。
+
 ### 搜索工具
 
 ```json
@@ -152,6 +181,7 @@ curl -sS -X POST http://localhost:8788/mcp/ \
   "params": {
     "name": "server_control",
     "arguments": {
+      "task": "Find the public tool for wiring and build materials",
       "domain": "catalog",
       "action": "search",
       "query": "wire build material",
@@ -174,7 +204,7 @@ curl -sS -X POST http://localhost:8788/mcp/ \
 }
 ```
 
-### 定义区域
+### 查看可用的 typed operations
 
 ```json
 {
@@ -182,19 +212,17 @@ curl -sS -X POST http://localhost:8788/mcp/ \
   "id": 5,
   "method": "tools/call",
   "params": {
-    "name": "read_control",
+    "name": "world_editor",
     "arguments": {
-      "domain": "area",
-      "action": "define",
-      "x1": 10,
-      "y1": 20,
-      "x2": 20,
-      "y2": 30,
-      "label": "starter-dig"
+      "task": "Inspect the typed operation files before planning an exact order",
+      "command": "read",
+      "path": "/active/ops/tools.md"
     }
   }
 }
 ```
+
+需要区域或精确位置时，以 `world_editor` 暴露的地图和 typed operation files 为准；不要直接调用内部 `read_control` / `coordinate_control`。
 
 ### 预览蓝图和材料
 
@@ -206,6 +234,7 @@ curl -sS -X POST http://localhost:8788/mcp/ \
   "params": {
     "name": "building_control",
     "arguments": {
+      "task": "Preview a Manual Generator near the Printing Pod",
       "domain": "planning",
       "action": "preview",
       "prefabId": "ManualGenerator",
@@ -251,6 +280,7 @@ curl -sS -X POST http://localhost:8788/mcp/ \
   "params": {
     "name": "orders_control",
     "arguments": {
+      "task": "Cut conduits in the starter-wire area",
       "domain": "conduit",
       "action": "cut_conduits",
       "areaId": "starter-wire",
@@ -323,6 +353,7 @@ mods/OniMcp/
 
 ## 客户端兼容建议
 
+- 新客户端优先尝试 `2026-07-28` `server/discover`，按发现结果使用当前现代 capability；需要完整旧工具面时继续使用受支持的 2025 initialize/session 路径。
 - 不要硬编码旧版细粒度工具列表。
 - Do not pass coordinates to ordinary tools. Exact orders use `/active/ops/orders.md`; exact construction edits map tokens in `/active/map/viewport.md`. Ignore hidden coordinate compatibility entries.
 - 先读取 manifest，再按 `domain/action` 组织调用。

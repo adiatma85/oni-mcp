@@ -2,25 +2,31 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OniMcp.Server;
 using OniMcp.Support;
+using PeterHan.PLib;
 using PeterHan.PLib.Options;
 using UnityEngine;
 
 namespace OniMcp.Config
 {
+    /// <summary>Persistent server and security settings exposed through PLib.</summary>
     [ConfigFile("OniMcpConfig.json", true)]
     [ModInfo("https://steamcommunity.com/sharedfiles/filedetails/?id=3731864673", "preview.png")]
     public class OniMcpOptions : IOptions
     {
-        private static OniMcpOptions _current;
+        private static readonly object SyncRoot = new object();
+        private static volatile OniMcpOptions _current;
         private const int CurrentSecurityMigrationVersion = 1;
+        private const int MaxDisplayedEndpointLength = 48;
+        private const string ProjectSupportUrl = "https://donate.lmm.best/?project=onimcp";
 
         public int SecurityMigrationVersion { get; set; } = CurrentSecurityMigrationVersion;
 
-        [Option("Host", "HTTP listen host. Use localhost for local clients, or 0.0.0.0 to listen on all interfaces.", "Server")]
+        [Option("Host", "HTTP listen host. Localhost is the safe default; non-loopback hosts require authentication and expose plaintext HTTP unless protected by a trusted tunnel or TLS reverse proxy.", "Server")]
         public string Host { get; set; } = "localhost";
 
         public int Port { get; set; } = 8788;
@@ -33,10 +39,10 @@ namespace OniMcp.Config
             set => Port = ParseCompactInt(value, Port, 1024, 65535);
         }
 
-        [Option("Require token", "Disabled by default. Enable manually to require the configured bearer token for every MCP request.", "Security")]
+        [Option("Require token", "Disabled by default for loopback-only access. Non-loopback hosts require authentication.", "Security")]
         public bool AuthEnabled { get; set; } = false;
 
-        [Option("Token", "Used only when Require token is enabled. A token is generated safely if enabled while empty.", "Security")]
+        [DynamicOption(typeof(MaskedTokenOptionsEntry))]
         public string AuthToken { get; set; } = CreateAuthToken();
 
         [Option("Disable auto disinfect globally", "Keep ONI's global auto disinfect setting disabled when the mod applies this policy.", "Gameplay")]
@@ -69,9 +75,15 @@ namespace OniMcp.Config
         {
             get
             {
-                if (_current == null)
-                    _current = Load();
-                return _current;
+                var current = _current;
+                if (current != null)
+                    return current;
+                lock (SyncRoot)
+                {
+                    if (_current == null)
+                        _current = Load();
+                    return _current;
+                }
             }
         }
 
@@ -87,11 +99,24 @@ namespace OniMcp.Config
         public string ScreenshotBaseUrl => $"http://{DisplayHost}:{Port}/screenshots/";
 
         [JsonIgnore]
+        internal bool IsLoopbackHost => IsLoopback(Host);
+
+        [JsonIgnore]
+        internal string PlaintextRemoteWarning => IsLoopbackHost
+            ? null
+            : "Remote OniMcp HTTP is plaintext. Bearer tokens are not encrypted; prefer a trusted VPN/tunnel or a TLS-terminating reverse proxy with a loopback upstream.";
+
+        [JsonIgnore]
         public IEnumerable<string> ListenPrefixes
         {
             get
             {
-                if (Host == "localhost")
+                ValidateListenSecurity();
+                string host = NormalizeHost(Host);
+                if (!IsLoopbackHost)
+                    OniMcpLog.Warning("[OniMcp] " + PlaintextRemoteWarning);
+
+                if (host == "localhost")
                 {
                     yield return $"http://localhost:{Port}/";
                     yield return $"http://127.0.0.1:{Port}/";
@@ -111,29 +136,60 @@ namespace OniMcp.Config
 
         public static void Reload()
         {
-            _current = Load();
+            lock (SyncRoot)
+                _current = Load();
         }
 
         public static void Save(OniMcpOptions options)
         {
-            options = Sanitize(options);
-            string path = ConfigPath;
-            string dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
+            lock (SyncRoot)
+            {
+                options = Sanitize(options);
+                options.ValidateListenSecurity();
+                string path = ConfigPath;
+                if (string.IsNullOrEmpty(path))
+                    throw new InvalidOperationException("The config path is not available.");
+                string dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir))
+                    Directory.CreateDirectory(dir);
 
-            string json = JsonConvert.SerializeObject(options, Formatting.Indented);
-            File.WriteAllText(path, json);
-            _current = options;
+                string json = JsonConvert.SerializeObject(options, Formatting.Indented);
+                // Keep the original file intact until its replacement has been fully written.
+                string temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    File.WriteAllText(temporaryPath, json);
+                    if (File.Exists(path))
+                        File.Replace(temporaryPath, path, null);
+                    else
+                        File.Move(temporaryPath, path);
+                    _current = options;
+                }
+                finally
+                {
+                    try
+                    {
+                        File.Delete(temporaryPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        OniMcpLog.Warning("[OniMcp] Failed to remove temporary config " + temporaryPath + ": " + ex.Message);
+                    }
+                }
+            }
         }
 
         public IEnumerable<IOptionsEntry> CreateOptions()
         {
+            string endpoint = EndpointUrl;
+            string displayedEndpoint = endpoint.Length > MaxDisplayedEndpointLength
+                ? endpoint.Substring(0, MaxDisplayedEndpointLength - 3) + "..."
+                : endpoint;
             yield return new TextBlockOptionsEntry(
                 "OniMcpStatus",
                 new OptionAttribute(
-                    "Endpoint: " + EndpointUrl + "\nConfig: " + ConfigPath + "\nAuthentication: " + (AuthEnabled ? "enabled" : "disabled by default"),
-                    "Current endpoint and config path. Expand Status, Server, Security, and Screenshots; PLib scrolls the dialog when needed.",
+                    "Endpoint: " + displayedEndpoint + "\nConfig: OniMcpConfig.json\nAuthentication: " + (AuthEnabled ? "enabled" : "disabled by default"),
+                    "Endpoint: " + endpoint + "\nConfig: " + ConfigPath + "\nUse Open config folder to locate the file.",
                     "Status"));
 
             var browseButton = new ButtonOptionsEntry(
@@ -162,6 +218,16 @@ namespace OniMcp.Config
                     "Status"));
             configButton.Value = (Action<object>)(_ => OpenConfigFolder());
             yield return configButton;
+
+            var supportButton = new ButtonOptionsEntry(
+                "OpenProjectSupport",
+                new OptionAttribute(
+                    "捐赠 / Donate",
+                    ProjectSupportUrl + "\n可选捐赠，支持 OniMcp 开发。"
+                        + "\nOptional donation for OniMcp development.",
+                    "Support"));
+            supportButton.Value = (Action<object>)(_ => Application.OpenURL(ProjectSupportUrl));
+            yield return supportButton;
         }
 
         public void OnOptionsChanged()
@@ -202,13 +268,6 @@ namespace OniMcp.Config
         private static OniMcpOptions Load()
         {
             string path = ConfigPath;
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                var created = Sanitize(new OniMcpOptions());
-                TrySave(created);
-                return created;
-            }
-
             try
             {
                 string json = File.ReadAllText(path);
@@ -219,12 +278,19 @@ namespace OniMcp.Config
                 TrySave(options);
                 return options;
             }
+            catch (Exception ex) when (ex is FileNotFoundException || ex is DirectoryNotFoundException)
+            {
+                var created = Sanitize(new OniMcpOptions());
+                TrySave(created);
+                return created;
+            }
             catch (Exception ex)
             {
                 OniMcpLog.Warning("[OniMcp] Failed to read config " + path + ": " + ex.Message);
-                var fallback = Sanitize(new OniMcpOptions());
-                TrySave(fallback);
-                return fallback;
+                // A transient read failure must not overwrite the user's settings or token.
+                if (_current != null)
+                    return _current;
+                throw new InvalidOperationException("Cannot load OniMcp config " + path + ". Fix the file before starting the server.", ex);
             }
         }
 
@@ -271,6 +337,16 @@ namespace OniMcp.Config
             options.SecurityMigrationVersion = CurrentSecurityMigrationVersion;
         }
 
+        internal void ValidateListenSecurity()
+        {
+            if (IsLoopbackHost || AuthEnabled)
+                return;
+
+            throw new InvalidOperationException(
+                "Refusing to expose OniMcp on non-loopback host '" + NormalizeHost(Host)
+                + "' without authentication. Enable Require token or use localhost/127.0.0.1/::1.");
+        }
+
         private static string CreateAuthToken()
         {
             return Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
@@ -282,9 +358,31 @@ namespace OniMcp.Config
                 return "localhost";
 
             host = host.Trim();
+            if (host.Length > 2 && host[0] == '[' && host[host.Length - 1] == ']')
+                host = host.Substring(1, host.Length - 2);
+            if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+                return "localhost";
             if (host == "*" || host == "+")
                 return "0.0.0.0";
 
+            return host;
+        }
+
+        private static bool IsLoopback(string host)
+        {
+            host = NormalizeHost(host);
+            if (host == "localhost")
+                return true;
+
+            return IPAddress.TryParse(host, out IPAddress address) && IPAddress.IsLoopback(address);
+        }
+
+        private static string FormatHostForUrl(string host)
+        {
+            if (string.IsNullOrEmpty(host) || host == "+")
+                return host;
+            if (host.IndexOf(':') >= 0 && !(host[0] == '[' && host[host.Length - 1] == ']'))
+                return "[" + host + "]";
             return host;
         }
 
@@ -310,21 +408,14 @@ namespace OniMcp.Config
         {
             get
             {
-                if (Host == "0.0.0.0")
+                string host = NormalizeHost(Host);
+                if (host == "0.0.0.0")
                     return "+";
-                return Host;
+                return FormatHostForUrl(host);
             }
         }
 
         [JsonIgnore]
-        private string DisplayHost
-        {
-            get
-            {
-                if (Host == "+")
-                    return "0.0.0.0";
-                return Host;
-            }
-        }
+        private string DisplayHost => FormatHostForUrl(NormalizeHost(Host));
     }
 }

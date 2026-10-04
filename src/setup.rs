@@ -34,43 +34,24 @@ fn prompt(question: &str, default: Option<&str>) -> Result<String> {
     }
 }
 
+fn managed_relative_path(os: &str) -> &'static str {
+    match os {
+        "macos" => "OxygenNotIncluded.app/Contents/Resources/Data/Managed",
+        _ => "OxygenNotIncluded_Data/Managed",
+    }
+}
+
+fn managed_path(game_path: &Path, os: &str) -> PathBuf {
+    game_path.join(managed_relative_path(os))
+}
+
 fn auto_detect() -> Option<PathBuf> {
-    let home = env::var_os("HOME")?;
+    for steam_root in crate::steam::library_roots() {
+        let game_path = steam_root.join("steamapps/common/OxygenNotIncluded");
+        let assembly = managed_path(&game_path, env::consts::OS).join("Assembly-CSharp.dll");
 
-    #[cfg(target_os = "linux")]
-    {
-        let p = PathBuf::from(&home).join(".local/share/Steam/steamapps/common/OxygenNotIncluded");
-        if p.join("OxygenNotIncluded_Data/Managed/Assembly-CSharp.dll")
-            .exists()
-        {
-            return Some(p);
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let p = PathBuf::from(&home)
-            .join("Library/Application Support/Steam/steamapps/common/OxygenNotIncluded");
-        if crate::config::managed_path_candidates(&p)
-            .iter()
-            .any(|m| m.join("Assembly-CSharp.dll").exists())
-        {
-            return Some(p);
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        for base in [
-            "C:\\Program Files (x86)\\Steam\\steamapps\\common\\OxygenNotIncluded",
-            "C:\\Program Files\\Steam\\steamapps\\common\\OxygenNotIncluded",
-        ] {
-            let p = PathBuf::from(base);
-            if p.join("OxygenNotIncluded_Data\\Managed\\Assembly-CSharp.dll")
-                .exists()
-            {
-                return Some(p);
-            }
+        if assembly.is_file() {
+            return Some(game_path);
         }
     }
 
@@ -102,9 +83,9 @@ fn backup_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{}.onim-backup-{}", name, stamp))
 }
 
-fn validate_game_path(path: &PathBuf) -> Result<Vec<String>> {
+fn validate_game_path(path: &Path) -> Result<Vec<String>> {
     let mut errors = vec![];
-    let managed = crate::config::managed_path_for_game(path);
+    let managed = managed_path(path, env::consts::OS);
 
     let required = [
         ("Assembly-CSharp.dll", i18n::desc_game_dll()),
@@ -168,13 +149,13 @@ pub fn run() -> Result<()> {
     if config_path.exists() {
         let content = fs::read_to_string(&config_path).unwrap_or_default();
         for line in content.lines() {
-            if line.trim_start().starts_with("game_path") {
-                if let Some((_, val)) = line.split_once('=') {
-                    let p = val.trim().trim_matches('"').trim_matches('\'');
-                    let pb = PathBuf::from(p);
-                    if pb.exists() {
-                        game_path = Some(pb);
-                    }
+            if line.trim_start().starts_with("game_path")
+                && let Some((_, val)) = line.split_once('=')
+            {
+                let p = val.trim().trim_matches('"').trim_matches('\'');
+                let pb = PathBuf::from(p);
+                if pb.exists() {
+                    game_path = Some(pb);
                 }
             }
         }
@@ -209,7 +190,7 @@ pub fn run() -> Result<()> {
         game_path = Some(PathBuf::from(input));
     }
 
-    let game_path = game_path.unwrap();
+    let game_path = game_path.ok_or_else(|| anyhow::anyhow!("未提供游戏路径"))?;
 
     // 2. 验证
     println!("\n🔍 {}", i18n::verifying_game_files());
@@ -257,10 +238,8 @@ pub fn run() -> Result<()> {
     }
 
     // 4. 写入 Directory.Build.props
-    // Managed 目录按平台实际布局解析后写成绝对路径：
-    // macOS 的 .app 包把游戏数据放在 Contents/Resources/Data，和 Windows/Linux 不同，
-    // 直接用 $(OniGamePath)/OxygenNotIncluded_Data/Managed 拼接会得到不存在的路径。
-    let managed_path = crate::config::managed_path_for_game(&game_path);
+    let sep = std::path::MAIN_SEPARATOR_STR;
+    let managed_relative = managed_relative_path(env::consts::OS).replace('/', sep);
     let props_content = format!(
         r#"<Project>
 
@@ -271,7 +250,7 @@ pub fn run() -> Result<()> {
   </PropertyGroup>
 
   <PropertyGroup>
-    <OniManagedPath>{}</OniManagedPath>
+    <OniManagedPath>$(OniGamePath){}{}</OniManagedPath>
   </PropertyGroup>
 
   <Target Name="ValidateOniGamePath" BeforeTargets="BeforeBuild">
@@ -281,7 +260,8 @@ pub fn run() -> Result<()> {
 </Project>
 "#,
         game_path.to_string_lossy().replace('"', "&quot;"),
-        managed_path.to_string_lossy().replace('"', "&quot;"),
+        sep,
+        managed_relative,
         game_path_unset = i18n::err_game_path_unset()
     );
 
@@ -298,4 +278,29 @@ pub fn run() -> Result<()> {
     println!("{}", i18n::next_init());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::managed_relative_path;
+
+    #[test]
+    fn uses_current_macos_managed_layout() {
+        assert_eq!(
+            managed_relative_path("macos"),
+            "OxygenNotIncluded.app/Contents/Resources/Data/Managed"
+        );
+    }
+
+    #[test]
+    fn preserves_windows_and_linux_managed_layout() {
+        assert_eq!(
+            managed_relative_path("windows"),
+            "OxygenNotIncluded_Data/Managed"
+        );
+        assert_eq!(
+            managed_relative_path("linux"),
+            "OxygenNotIncluded_Data/Managed"
+        );
+    }
 }

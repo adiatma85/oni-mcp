@@ -6,8 +6,6 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OniMcp.Core;
 using OniMcp.Server;
-using STRINGS;
-using UnityEngine;
 using OniMcp.Support;
 
 namespace OniMcp.Tools
@@ -208,7 +206,16 @@ namespace OniMcp.Tools
                     if (target == null)
                         return CallToolResult.Error(error);
 
-                    LoadScreen.DoLoad(target);
+                    int contextGeneration = GameContextLifecycle.BeginSaveLoad();
+                    try
+                    {
+                        LoadScreen.DoLoad(target);
+                    }
+                    catch
+                    {
+                        GameContextLifecycle.SaveLoadFailed(contextGeneration);
+                        throw;
+                    }
                     return CallToolResult.Text(JsonConvert.SerializeObject(new Dictionary<string, object>
                     {
                         ["loading"] = target,

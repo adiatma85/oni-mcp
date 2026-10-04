@@ -3,8 +3,12 @@ using CycleTrim.Core;
 
 namespace CycleTrim.BrainBenchmarks
 {
-    internal static class Program
+    internal static partial class Program
     {
+        [System.Diagnostics.CodeAnalysis.SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "The benchmark entry point reports every failed assertion as a non-zero exit code.")]
         private static int Main(string[] args)
         {
             try
@@ -99,6 +103,7 @@ namespace CycleTrim.BrainBenchmarks
                 RunTest(
                     nameof(PathProbeWorkOrderAdapterUsesExactRefreshAndCloneCounts),
                     PathProbeWorkOrderAdapterUsesExactRefreshAndCloneCounts);
+                RunPathProbeRegressionTests();
                 return 0;
             }
             catch (Exception exception)
@@ -297,6 +302,8 @@ namespace CycleTrim.BrainBenchmarks
                 new PathProbeStamp(1, 2, 3UL, 4, 5, true, 9, 7),
                 new PathProbeStamp(1, 2, 3UL, 4, 5, true, 6, 9)
             };
+            var equal = new PathProbeStamp(1, 2, 3UL, 4, 5, true, 6, 7);
+            AssertTrue(baseline.Equals(equal), "equal stamps compare equal");
             for (var index = 0; index < variants.Length; index++)
             {
                 AssertFalse(baseline.Equals(variants[index]), "stamp dimension " + index);
@@ -307,6 +314,12 @@ namespace CycleTrim.BrainBenchmarks
             AssertEqual(1L, PathProbeBackpressure.ComputeQueueQuota(1, 1), "one busy worker");
             AssertEqual(4L, PathProbeBackpressure.ComputeQueueQuota(8, 0), "many idle workers");
             AssertEqual(1L, PathProbeBackpressure.ComputeQueueQuota(2, 8), "busy never starves");
+            AssertArgumentOutOfRange(
+                delegate { PathProbeBackpressure.ComputeQueueQuota(-1, 0); },
+                "workerCount");
+            AssertArgumentOutOfRange(
+                delegate { PathProbeBackpressure.ComputeQueueQuota(0, -1); },
+                "inFlightCount");
         }
 
         private static void PathProbeWorkOrderAdapterUsesExactRefreshAndCloneCounts()
@@ -314,7 +327,7 @@ namespace CycleTrim.BrainBenchmarks
             var adapter = new PathProbeWorkOrderAdapterSimulator();
             adapter.Prepare(exactCreature: false, sentinelSafe: true, completedHit: false);
             AssertEqual(0L, adapter.RefreshCalls, "unsupported zero refresh");
-            AssertEqual(0L, adapter.StateLookups, "unsupported zero state");
+            AssertEqual(1L, adapter.StateLookups, "unsupported checks existing state for invalidation");
 
             adapter.ResetCounts();
             adapter.Prepare(exactCreature: true, sentinelSafe: true, completedHit: false);
@@ -791,8 +804,7 @@ namespace CycleTrim.BrainBenchmarks
 
         private static void VanillaBudgetMatchesOneDupeAndFiveCreaturesPerRenderTick()
         {
-            var scheduler = new VanillaBrainSchedulerSimulator();
-            var result = scheduler.Run(120, 30);
+            var result = VanillaBrainSchedulerSimulator.Run(120, 30);
 
             AssertEqual(3600L, result.DupeCalls, "dupe calls");
             AssertEqual(18000L, result.CreatureCalls, "creature calls");
@@ -805,6 +817,26 @@ namespace CycleTrim.BrainBenchmarks
                 throw new InvalidOperationException(
                     name + ": expected " + expected + ", actual " + actual);
             }
+        }
+
+        private static void AssertArgumentOutOfRange(Action action, string expectedParameter)
+        {
+            try
+            {
+                action();
+            }
+            catch (ArgumentOutOfRangeException error)
+            {
+                if (error.ParamName == expectedParameter)
+                {
+                    return;
+                }
+                throw new InvalidOperationException(
+                    "expected parameter " + expectedParameter + ", actual " + error.ParamName,
+                    error);
+            }
+            throw new InvalidOperationException(
+                "expected ArgumentOutOfRangeException for " + expectedParameter);
         }
 
         private static void AssertTrue(bool actual, string name)

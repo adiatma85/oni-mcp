@@ -17,6 +17,8 @@ pub struct ModConfig {
     pub name: Option<String>,
     /// Steam 创意工坊 ID（publishedfileid），配置后发布时自动使用
     pub publishedfileid: Option<String>,
+    /// 可选的 Steam 创意工坊标题；未配置时使用 mod.yaml 的 title
+    pub workshop_title: Option<String>,
 }
 
 impl ModConfig {
@@ -79,19 +81,18 @@ impl SelectedMod {
             })
         });
 
-        if let Some(csproj) = csproj {
-            if let Ok(content) = std::fs::read_to_string(&csproj) {
-                // 简单解析 <AssemblyName>值</AssemblyName>
-                if let Some(start) = content.find("<AssemblyName>") {
-                    if let Some(end) = content.find("</AssemblyName>") {
-                        if end > start {
-                            let val = &content[start + "<AssemblyName>".len()..end];
-                            let trimmed = val.trim();
-                            if !trimmed.is_empty() {
-                                return trimmed.to_string();
-                            }
-                        }
-                    }
+        if let Some(csproj) = csproj
+            && let Ok(content) = std::fs::read_to_string(&csproj)
+        {
+            // 简单解析 <AssemblyName>值</AssemblyName>
+            if let Some(start) = content.find("<AssemblyName>")
+                && let Some(end) = content.find("</AssemblyName>")
+                && end > start
+            {
+                let val = &content[start + "<AssemblyName>".len()..end];
+                let trimmed = val.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
                 }
             }
         }
@@ -304,6 +305,15 @@ impl Config {
         if self.mods.is_empty() {
             anyhow::bail!("{}", i18n::err_no_mods_in(DEFAULT_CONFIG_NAME.to_string()));
         }
+        // HashMap iteration order is deliberately unspecified. Use the same
+        // alphabetical fallback as `select_all_mods` so a missing default is
+        // deterministic across runs and platforms.
+        let fallback = self
+            .mods
+            .keys()
+            .min()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("没有可选择的 Mod"))?;
         let key = match explicit {
             Some(k) => {
                 if !self.mods.contains_key(&k) {
@@ -311,19 +321,18 @@ impl Config {
                 }
                 k
             }
-            None => {
-                if let Some(ref default) = self.default_mod {
-                    if self.mods.contains_key(default) {
-                        default.clone()
-                    } else {
-                        self.mods.keys().next().unwrap().clone()
-                    }
-                } else {
-                    self.mods.keys().next().unwrap().clone()
-                }
-            }
+            None => self
+                .default_mod
+                .as_ref()
+                .filter(|default| self.mods.contains_key(*default))
+                .cloned()
+                .unwrap_or(fallback),
         };
-        let cfg = self.mods.get(&key).unwrap().clone();
+        let cfg = self
+            .mods
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("找不到已选择的 Mod：{}", key))?;
         Ok(SelectedMod {
             name: cfg.mod_name(&key),
             config: cfg,
@@ -374,10 +383,10 @@ pub fn load(explicit_path: Option<PathBuf>) -> Result<Config> {
         find_config_file()?.unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_NAME))
     };
 
-    let repo_root = config_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| env::current_dir().unwrap());
+    let repo_root = match config_path.parent() {
+        Some(parent) => parent.to_path_buf(),
+        None => env::current_dir().context("读取当前目录失败")?,
+    };
 
     // 从 Directory.Build.props 读取游戏路径
     let game_path = read_game_path_from_props(&repo_root)?;
@@ -470,11 +479,12 @@ fn game_user_data_dir() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_config_for_doctor;
-    use std::path::Path;
+    use super::{Config, ModConfig, parse_config_for_doctor};
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
 
     #[test]
-    fn doctor_config_parser_should_preserve_resolvable_mods() {
+    fn doctor_config_parser_should_preserve_resolvable_mods() -> anyhow::Result<()> {
         let mods = parse_config_for_doctor(
             r#"
 default_mod = "Example"
@@ -482,12 +492,45 @@ default_mod = "Example"
 [mods.Example]
 path = "mods/Example"
 "#,
-        )
-        .expect("valid doctor config should parse");
+        )?;
 
         assert_eq!(
             mods["Example"].project_abs(Path::new("/repo")),
             Path::new("/repo/mods/Example")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn select_mod_without_default_uses_sorted_name() -> anyhow::Result<()> {
+        let mods = HashMap::from([
+            (
+                "Zulu".to_string(),
+                ModConfig {
+                    path: PathBuf::from("mods/Zulu"),
+                    name: None,
+                    publishedfileid: None,
+                    workshop_title: None,
+                },
+            ),
+            (
+                "Alpha".to_string(),
+                ModConfig {
+                    path: PathBuf::from("mods/Alpha"),
+                    name: None,
+                    publishedfileid: None,
+                    workshop_title: None,
+                },
+            ),
+        ]);
+        let config = Config {
+            game_path: PathBuf::new(),
+            mods,
+            default_mod: None,
+        };
+
+        let selected = config.select_mod(None)?;
+        assert_eq!(selected.name, "Alpha");
+        Ok(())
     }
 }

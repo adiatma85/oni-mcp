@@ -4,6 +4,10 @@
 
 ONI MCP Server 是《缺氧》Mod：启动本地 MCP 服务（`http://localhost:8788/mcp/`），提供 `oni://` 资源读取与受控写入入口，面向 AI 客户端做安全联动。
 
+支持 OniMcp 的开发与测试：[捐赠](https://donate.lmm.best/?project=onimcp)。
+
+[![OniMcp 捐赠进度](https://donate.lmm.best/badge.svg?project=onimcp&currency=CNY&lang=zh-CN&period=all&layout=compact&theme=dark&width=360&title=OniMCP)](https://donate.lmm.best/?project=onimcp)
+
 ## 快速索引
 
 - [用途与边界](https://github.com/LIghtJUNction/OniMods/blob/main/mods/OniMcp/README.md#用途与边界)
@@ -46,14 +50,17 @@ ONI MCP Server 是《缺氧》Mod：启动本地 MCP 服务（`http://localhost:
 
 - 配置文件: `OniMcpConfig.json`
 - 常见字段、默认值与优先路径见: [mods/OniMcp/ModInfo.cs](ModInfo.cs)
-- 默认 `AuthEnabled` 为 `false`；仅手动开启认证后才会强制 token，如需局域网访问建议开启认证并设置强随机 token。
-- 安全迁移只记录迁移版本，不会改变既有 `AuthEnabled` 选择；已开启认证的旧配置仍要求客户端携带 token。
+- `localhost`、`127.0.0.1`、`::1` 保持默认无 token 的本机开发体验；默认 `AuthEnabled=false`。
+- 非 loopback 地址（包括 `0.0.0.0`、局域网 IP 和远程主机名）必须启用 `AuthEnabled=true`，否则配置保存/监听会 fail closed，不会启动网络监听。
+- Bearer token 只提供认证，不提供传输加密。直接远程 `http://` 会明文传输 token；远程访问应优先使用可信 VPN/隧道，或由 TLS 反向代理终止 HTTPS，并让 OniMcp 上游保持 loopback/local。
+- 安全迁移只记录迁移版本，不会静默把旧配置改成更宽的网络监听；已开启认证的旧配置仍要求客户端携带 token。
 - 修改配置后点击 **Restart MCP server** 或重启游戏生效。
 
 ## 主要工具组
 
 - 工具清单入口: `oni://tools/manifest` / `server_control domain=catalog action=manifest`
 - 常用公开工具:
+  - `benchmark`：只读工具链路基准与诊断
   - `world_editor`：虚拟文件化世界读写（`cd`、`ls`、`read`、`search`、`edit`）
   - `game_control`：游戏控制与状态管理
   - `navigation_control`：视图、覆盖层和截图
@@ -77,6 +84,9 @@ ONI MCP Server 是《缺氧》Mod：启动本地 MCP 服务（`http://localhost:
 
 - 在 `1.0.0` 之前，工具名、参数和响应结构可能发生不兼容改动。
 - 外部客户端请固定版本，并优先以运行时 manifest 为准。
+- `2025-11-25` / `2025-06-18` 客户端继续使用 `initialize` + `Mcp-Session-Id` 的完整工具路径。
+- `2026-07-28` 提供无会话兼容：`server/discover`、`resources/list`、`resources/templates/list`、`resources/read`，以及一个刻意收窄的工具切片：`tools/list` 只广告只读 `benchmark`，`tools/call` 也只允许调用该工具。该路径要求每个请求携带现代 `_meta`、`Mcp-Protocol-Version`、`Mcp-Method`；资源读取和工具调用还要求匹配的 `Mcp-Name`。它不会创建或返回 `Mcp-Session-Id`。
+- 现代路径不会暴露 2025 core Tasks 字段，也暂不广告 Tasks、MRTR、订阅或会改变游戏状态的工具。其他工具继续走 2025 会话路径，直到完成 request-scoped 状态和对应的 2026 header/schema 验证。
 
 ## 更新与验证
 

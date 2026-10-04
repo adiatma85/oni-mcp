@@ -1,16 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
-using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using OniMcp.Config;
-using OniMcp.Core;
 using OniMcp.Support;
-using OniMcp.Tools;
 using UnityEngine;
 
 namespace OniMcp.Server
@@ -64,21 +59,29 @@ namespace OniMcp.Server
             if (request == null)
                 return 0;
 
+            List<McpSession> prunedSessions;
             List<McpSession> sessions;
+            System.DateTime now = _legacySessionPolicy.UtcNow();
             lock (_sessionLock)
             {
+                prunedSessions = PruneExpiredLegacySessionsLocked(now);
                 sessions = _sessions.Values
                     .Where(session => !requireSampling || session.Capabilities?.Sampling != null)
                     .ToList();
             }
+            ClosePrunedLegacySessions(prunedSessions);
 
+            int queued = 0;
             foreach (var session in sessions)
-                session.EnqueueOutbound(CloneOutboundMessage(request));
+            {
+                if (session.EnqueueOutbound(CloneOutboundMessage(request)))
+                    queued++;
+            }
 
-            if (sessions.Count > 0)
-                OniMcpLog.Debug($"[OniMcp] Queued client request {request["method"]} for {sessions.Count} session(s).");
+            if (queued > 0)
+                OniMcpLog.Debug($"[OniMcp] Queued client request {request["method"]} for {queued} session(s).");
 
-            return sessions.Count;
+            return queued;
         }
 
         public int EnqueueClientNotification(string level, string logger, object data)

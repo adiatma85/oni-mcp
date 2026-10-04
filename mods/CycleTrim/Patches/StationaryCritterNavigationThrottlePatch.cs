@@ -20,6 +20,7 @@ namespace CycleTrim.Patches
         {
             internal readonly VersionedRefreshGate Gate =
                 new VersionedRefreshGate(8);
+            internal NavGrid NavGrid;
         }
 
         private static State CreateState(Navigator navigator)
@@ -35,11 +36,11 @@ namespace CycleTrim.Patches
 
         private static RefreshStamp CaptureStamp(
             Navigator navigator,
+            int cell,
             bool forceUpdate,
             bool reportOccupation,
             bool executePathProbeTaskAsync)
         {
-            var cell = Grid.PosToCell(navigator);
             var context = (int)navigator.CurrentNavType & 0xFF;
             context |= ((int)navigator.flags & 0xFF) << 8;
             if (forceUpdate)
@@ -95,8 +96,8 @@ namespace CycleTrim.Patches
                 || __instance.IsMoving()
                 || ___reportOccupation
                 || ___executePathProbeTaskAsync
-                || !(___abilities is CreaturePathFinderAbilities)
-                || __instance.GetComponent<CreatureBrain>() == null)
+                || ___abilities == null
+                || ___abilities.GetType() != typeof(CreaturePathFinderAbilities))
             {
                 if (States.TryGetValue(__instance, out var preservedState))
                 {
@@ -106,10 +107,36 @@ namespace CycleTrim.Patches
                 return true;
             }
 
-            var state = States.GetValue(__instance, StateFactory);
+            var cell = __instance.cachedCell;
+            if (!Grid.IsValidCell(cell))
+            {
+                if (States.TryGetValue(__instance, out var invalidCellState))
+                {
+                    invalidCellState.Gate.Invalidate();
+                }
+
+                return true;
+            }
+
+            if (!States.TryGetValue(__instance, out var state))
+            {
+                if (__instance.GetComponent<CreatureBrain>() == null)
+                {
+                    return true;
+                }
+
+                state = States.GetValue(__instance, StateFactory);
+            }
+
+            if (!ReferenceEquals(state.NavGrid, __instance.NavGrid))
+            {
+                state.Gate.Reset();
+                state.NavGrid = __instance.NavGrid;
+            }
             return state.Gate.ShouldRefresh(
                 CaptureStamp(
                     __instance,
+                    cell,
                     forceUpdate,
                     ___reportOccupation,
                     ___executePathProbeTaskAsync));

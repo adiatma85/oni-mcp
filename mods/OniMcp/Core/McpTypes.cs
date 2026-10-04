@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -38,14 +37,16 @@ namespace OniMcp.Core
         [JsonProperty("jsonrpc")]
         public string JsonRpc { get; set; } = "2.0";
 
-        [JsonProperty("id")]
+        [JsonProperty("id", NullValueHandling = NullValueHandling.Include)]
         public object Id { get; set; }
 
-        [JsonProperty("result")]
+        [JsonProperty("result", NullValueHandling = NullValueHandling.Include)]
         public object Result { get; set; }
 
-        [JsonProperty("error")]
+        [JsonProperty("error", NullValueHandling = NullValueHandling.Ignore)]
         public JsonRpcError Error { get; set; }
+
+        public bool ShouldSerializeResult() => Error == null;
 
         public static JsonRpcResponse Success(object id, object result)
         {
@@ -254,6 +255,12 @@ namespace OniMcp.Core
 
         [JsonProperty("enum")]
         public List<object> Enum { get; set; }
+
+        [JsonProperty("properties", NullValueHandling = NullValueHandling.Ignore)]
+        public Dictionary<string, SchemaProperty> Properties { get; set; }
+
+        [JsonProperty("x-mcp-header", NullValueHandling = NullValueHandling.Ignore)]
+        public string McpHeader { get; set; }
     }
 
     /// <summary>

@@ -70,7 +70,7 @@ pub fn run(cfg: &Config) -> Result<()> {
     if !dev_mods.is_empty() {
         println!("🔧 {}{}", i18n::section_dev(dev_mods.len()), i18n::sep().trim_end());
         for (name, info) in &dev_mods {
-            print_mod_info(&name, info);
+            print_mod_info(name, info);
         }
         println!();
     }
@@ -79,7 +79,7 @@ pub fn run(cfg: &Config) -> Result<()> {
     if !legacy_dev_mods.is_empty() {
         println!("⚠️  {}{}", i18n::section_dev_lower(legacy_dev_mods.len()), i18n::sep().trim_end());
         for (name, info) in &legacy_dev_mods {
-            print_mod_info(&name, info);
+            print_mod_info(name, info);
         }
         println!();
     }
@@ -89,7 +89,7 @@ pub fn run(cfg: &Config) -> Result<()> {
     if !local_mods.is_empty() {
         println!("📦 {}{}", i18n::section_local(local_mods.len()), i18n::sep().trim_end());
         for (name, info) in &local_mods {
-            print_mod_info(&name, info);
+            print_mod_info(name, info);
         }
         println!();
     }

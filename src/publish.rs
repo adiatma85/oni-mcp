@@ -1,68 +1,56 @@
-use crate::i18n;
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::build;
 use crate::config::{Config, SelectedMod};
 
+#[derive(Debug, Default)]
+pub struct PublishOptions {
+    pub use_gui: bool,
+    pub auto_note: bool,
+    pub non_interactive: bool,
+    pub dry_run: bool,
+}
+
 fn uploader_path() -> Option<PathBuf> {
-    let home = env::var_os("HOME")?;
-
     #[cfg(target_os = "linux")]
-    {
-        let p = PathBuf::from(&home)
-            .join(".local/share/Steam/steamapps/common/OxygenNotIncludedUploader/OniUploader64");
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
+    let relative = Path::new("steamapps/common/OxygenNotIncludedUploader/OniUploader64");
     #[cfg(target_os = "macos")]
-    {
-        let p = PathBuf::from(&home)
-            .join("Library/Application Support/Steam/steamapps/common/OxygenNotIncludedUploader/OxygenNotIncludedUploader.app/Contents/MacOS/OxygenNotIncludedUploader");
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
+    let relative = Path::new(
+        "steamapps/common/OxygenNotIncludedUploader/OxygenNotIncludedUploader.app/Contents/MacOS/OxygenNotIncludedUploader",
+    );
     #[cfg(target_os = "windows")]
-    {
-        for p in [
-            "C:\\Program Files (x86)\\Steam\\steamapps\\common\\OxygenNotIncludedUploader\\OxygenNotIncludedUploader.exe",
-            "C:\\Program Files\\Steam\\steamapps\\common\\OxygenNotIncludedUploader\\OxygenNotIncludedUploader.exe",
-        ] {
-            let pb = PathBuf::from(p);
-            if pb.exists() {
-                return Some(pb);
-            }
+    let relative =
+        Path::new("steamapps/common/OxygenNotIncludedUploader/OxygenNotIncludedUploader.exe");
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    for steam_root in crate::steam::library_roots() {
+        let candidate = steam_root.join(relative);
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
 
     None
 }
 
-fn has_steamcmd() -> bool {
-    Command::new("sh")
-        .args(["-c", "command -v steamcmd > /dev/null 2>&1"])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
 fn generate_vdf(
-    dist_mod: &PathBuf,
-    preview: &PathBuf,
+    dist_mod: &Path,
+    preview: &Path,
     title: &str,
     description: &str,
     changenote: &str,
     publishedfileid: &str,
 ) -> Result<PathBuf> {
-    let vdf_path = dist_mod.join("workshop.vdf");
+    // Keep uploader metadata outside contentfolder so it is not shipped as mod content.
+    let vdf_path = dist_mod.with_extension("workshop.vdf");
+    let safe_publishedfileid = escape_vdf_value(publishedfileid);
+    let safe_contentfolder = vdf_path_value(dist_mod, "contentfolder")?;
+    let safe_previewfile = vdf_path_value(preview, "previewfile")?;
     let safe_title = escape_vdf_value(title);
     let safe_description = escape_vdf_value(description);
     let safe_changenote = escape_vdf_value(changenote);
@@ -79,59 +67,162 @@ fn generate_vdf(
 	"changenote"	"{}"
 }}
 	"#,
-        publishedfileid,
-        dist_mod.to_string_lossy().replace('\\', "/"),
-        preview.to_string_lossy().replace('\\', "/"),
+        safe_publishedfileid,
+        safe_contentfolder,
+        safe_previewfile,
         safe_title,
         safe_description,
         safe_changenote,
     );
     fs::write(&vdf_path, content)
-        .with_context(|| i18n::err_vdf_write(vdf_path.display().to_string()))?;
+        .with_context(|| format!("写入 vdf 失败：{}", vdf_path.display()))?;
     Ok(vdf_path)
 }
 
-fn read_mod_info(dist_mod: &PathBuf) -> Option<(String, String, String)> {
-    // 从 mod.yaml 读取标题和描述（游戏运行时使用）
-    let mut title = None;
-    let mut desc = None;
-    let yaml = fs::read_to_string(dist_mod.join("mod.yaml")).ok()?;
-    for line in yaml.lines() {
-        let line = line.trim();
-        if let Some((k, v)) = line.split_once(':') {
-            let k = k.trim();
-            let v = v.trim().trim_matches('"').trim_matches('\'');
-            if k == "title" {
-                title = Some(v.to_string());
-            } else if k == "description" {
-                desc = Some(v.to_string());
-            }
-        }
+fn reject_directory_upload_for_oni(vdf: &Path) -> Result<()> {
+    let content = fs::read_to_string(vdf)
+        .with_context(|| format!("读取 Workshop VDF 失败：{}", vdf.display()))?;
+    let app_id = content
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.trim_start().split('"');
+            (fields.next() == Some("") && fields.next() == Some("appid"))
+                .then(|| fields.nth(1))
+                .flatten()
+        })
+        .context("Workshop VDF 缺少 appid，拒绝目录上传")?
+        .parse::<u32>()
+        .context("Workshop VDF 的 appid 无效，拒绝目录上传")?;
+    if app_id != 457140 {
+        anyhow::bail!(
+            "Workshop VDF 的 appid 是 {}，不是 ONI 的 457140；拒绝发布",
+            app_id
+        );
     }
-    // 从 mod_info.yaml 读取版本号
-    let mut version = None;
-    if let Ok(yaml2) = fs::read_to_string(dist_mod.join("mod_info.yaml")) {
-        for line in yaml2.lines() {
-            let line = line.trim();
-            if let Some((k, v)) = line.split_once(':') {
-                let k = k.trim();
-                let v = v.trim().trim_matches('"').trim_matches('\'');
-                if k == "version" {
-                    version = Some(v.to_string());
-                }
-            }
-        }
-    }
-    Some((
-        title.unwrap_or_else(|| "Untitled Mod".to_string()),
-        steam_markdown_description(dist_mod)
-            .or_else(|| desc)
-            .unwrap_or_default(),
-        version.unwrap_or_else(|| "1.0.0".to_string()),
-    ))
+    Ok(())
 }
 
-fn read_file(path: &PathBuf) -> Option<String> {
+fn yaml_value(yaml: &str, key: &str) -> Option<String> {
+    yaml.lines().find_map(|line| {
+        let (candidate, value) = split_yaml_mapping(line)?;
+        (candidate.trim() == key).then(|| parse_yaml_scalar(value))
+    })
+}
+
+/// Split one simple YAML mapping without mistaking a colon inside a quoted key
+/// for the key/value separator. The generated mod metadata is flat, so a full
+/// YAML dependency would be unnecessary here.
+fn split_yaml_mapping(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in line.char_indices() {
+        match quote {
+            Some('"') => {
+                if escaped {
+                    escaped = false;
+                } else if character == '\\' {
+                    escaped = true;
+                } else if character == '"' {
+                    quote = None;
+                }
+            }
+            Some('\'') => {
+                if character == '\'' {
+                    quote = None;
+                }
+            }
+            None => match character {
+                '"' | '\'' => quote = Some(character),
+                ':' => {
+                    return Some((&line[..index], &line[index + character.len_utf8()..]));
+                }
+                _ => {}
+            },
+            _ => unreachable!("yaml quote state only contains YAML quote characters"),
+        }
+    }
+    None
+}
+
+fn parse_yaml_scalar(value: &str) -> String {
+    let value = strip_yaml_comment(value).trim();
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2 && bytes.first() == Some(&b'"') && bytes.last() == Some(&b'"') {
+        return serde_json::from_str(value)
+            .unwrap_or_else(|_| value[1..value.len() - 1].to_string());
+    }
+    if bytes.len() >= 2 && bytes.first() == Some(&b'\'') && bytes.last() == Some(&b'\'') {
+        return value[1..value.len() - 1].replace("''", "'");
+    }
+    value.to_string()
+}
+
+fn strip_yaml_comment(value: &str) -> &str {
+    let first_non_whitespace = value
+        .char_indices()
+        .find_map(|(index, character)| (!character.is_whitespace()).then_some((index, character)));
+    let quote = first_non_whitespace.and_then(|(index, character)| {
+        matches!(character, '"' | '\'').then_some((index, character))
+    });
+
+    let mut chars = value.char_indices().peekable();
+    let mut in_quote = false;
+    let mut escaped = false;
+    let mut preceded_by_whitespace = true;
+    while let Some((index, character)) = chars.next() {
+        if quote.is_some_and(|(quote_index, _)| quote_index == index) {
+            in_quote = true;
+            preceded_by_whitespace = false;
+            continue;
+        }
+
+        if in_quote {
+            match quote.map(|(_, character)| character) {
+                Some('"') => {
+                    if escaped {
+                        escaped = false;
+                    } else if character == '\\' {
+                        escaped = true;
+                    } else if character == '"' {
+                        in_quote = false;
+                    }
+                }
+                Some('\'') if character == '\'' => {
+                    if chars.peek().is_some_and(|(_, next)| *next == '\'') {
+                        chars.next();
+                    } else {
+                        in_quote = false;
+                    }
+                }
+                _ => {}
+            }
+        } else if character == '#' && preceded_by_whitespace {
+            return value[..index].trim_end();
+        }
+        preceded_by_whitespace = character.is_whitespace();
+    }
+    value
+}
+
+fn read_mod_info(dist_mod: &Path) -> Option<(String, String, String)> {
+    let yaml = fs::read_to_string(dist_mod.join("mod.yaml")).ok()?;
+    let title = yaml_value(&yaml, "title").unwrap_or_else(|| "Untitled Mod".to_string());
+    let description = steam_markdown_description(dist_mod)
+        .or_else(|| yaml_value(&yaml, "description"))
+        .unwrap_or_default();
+    let version = fs::read_to_string(dist_mod.join("mod_info.yaml"))
+        .ok()
+        .and_then(|contents| yaml_value(&contents, "version"))
+        .unwrap_or_else(|| "1.0.0".to_string());
+    Some((title, description, version))
+}
+
+fn read_file(path: &Path) -> Option<String> {
     fs::read_to_string(path).ok().map(|s| s.trim().to_string())
 }
 
@@ -143,9 +234,20 @@ fn escape_vdf_value(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
-fn steam_markdown_description(dist_mod: &PathBuf) -> Option<String> {
-    let zh = read_file(&dist_mod.join("docs").join("steam-description-zh.md"));
-    let en = read_file(&dist_mod.join("docs").join("steam-description-en.md"));
+fn vdf_path_value(path: &Path, field: &str) -> Result<String> {
+    let value = path
+        .to_str()
+        .with_context(|| format!("{field} 路径不是有效 UTF-8：{}", path.display()))?;
+    Ok(escape_vdf_value(&value.replace('\\', "/")))
+}
+
+fn steam_description_file(dist_mod: &Path, name: &str) -> Option<String> {
+    read_file(&dist_mod.join("docs").join(name)).or_else(|| read_file(&dist_mod.join(name)))
+}
+
+fn steam_markdown_description(dist_mod: &Path) -> Option<String> {
+    let zh = steam_description_file(dist_mod, "steam-description-zh.md");
+    let en = steam_description_file(dist_mod, "steam-description-en.md");
     match (zh, en) {
         (Some(zh_txt), Some(en_txt)) if !zh_txt.is_empty() && !en_txt.is_empty() => {
             Some(format!("{}\n\n{}", zh_txt, en_txt))
@@ -156,12 +258,13 @@ fn steam_markdown_description(dist_mod: &PathBuf) -> Option<String> {
     }
 }
 
-fn extract_changelog_summary(project_dir: &PathBuf, max_items: usize) -> Option<String> {
-    let changelog = project_dir.join("CHANGELOG.md");
-    let content = fs::read_to_string(changelog).ok()?;
+fn latest_changelog_summary(content: &str, max_items: usize) -> Option<String> {
+    if max_items == 0 {
+        return None;
+    }
+
     let mut section_started = false;
     let mut entries: Vec<String> = Vec::new();
-
     for raw in content.lines() {
         let line = raw.trim();
         if line.starts_with("## ") {
@@ -171,33 +274,34 @@ fn extract_changelog_summary(project_dir: &PathBuf, max_items: usize) -> Option<
             section_started = true;
             continue;
         }
-        if !section_started {
+        if !section_started || line.is_empty() {
             continue;
         }
-        if line.is_empty() {
-            continue;
-        }
-        if line.starts_with("- [") {
-            let cleaned = line.trim_start_matches("- ").trim().to_string();
-            entries.push(cleaned);
+        if let Some(entry) = line.strip_prefix("- ") {
+            entries.push(format!("- {}", entry.trim()));
             if entries.len() >= max_items {
                 break;
             }
         }
     }
 
-    if entries.is_empty() {
-        return extract_git_summary(project_dir, max_items);
-    }
-
-    Some(format!(
-        "Auto changelog (latest {} items):\n{}",
-        entries.len(),
-        entries.join("\n")
-    ))
+    (!entries.is_empty()).then(|| {
+        format!(
+            "Auto changelog (latest {} items):\n{}",
+            entries.len(),
+            entries.join("\n")
+        )
+    })
 }
 
-fn extract_git_summary(project_dir: &PathBuf, max_items: usize) -> Option<String> {
+fn extract_changelog_summary(project_dir: &Path, max_items: usize) -> Option<String> {
+    let changelog = project_dir.join("CHANGELOG.md");
+    let content = fs::read_to_string(changelog).ok()?;
+    latest_changelog_summary(&content, max_items)
+        .or_else(|| extract_git_summary(project_dir, max_items))
+}
+
+fn extract_git_summary(project_dir: &Path, max_items: usize) -> Option<String> {
     let max_items = max_items.to_string();
     let output = Command::new("git")
         .arg("-C")
@@ -249,24 +353,27 @@ fn prompt(question: &str, default: Option<&str>) -> Result<String> {
     }
 }
 
-pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool) -> Result<()> {
-    let repo_root = env::var_os("ONI_CLI_REPO_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| env::current_dir().unwrap());
+pub fn run(cfg: &Config, selected: &SelectedMod, options: PublishOptions) -> Result<()> {
+    let PublishOptions {
+        use_gui,
+        auto_note,
+        non_interactive,
+        dry_run,
+    } = options;
+    let repo_root = match env::var_os("ONI_CLI_REPO_ROOT") {
+        Some(path) => PathBuf::from(path),
+        None => env::current_dir().context("读取当前目录失败")?,
+    };
 
     let assembly_name = selected.assembly_name(&repo_root);
-    println!("🚀 {}", i18n::preparing_publish(selected.name.to_string()));
+    println!("🚀 构建发布包：{}", selected.name);
     build::run(cfg, selected, true)?;
 
     let dist_mod = cfg.dist_dir(&repo_root).join(&assembly_name);
-
-    // 检查 mod_info.yaml
-    let mod_info = dist_mod.join("mod_info.yaml");
-    if !mod_info.exists() {
-        println!("⚠️  {}", i18n::warn_no_mod_info());
+    if !dist_mod.join("mod_info.yaml").exists() {
+        anyhow::bail!("发布包缺少 mod_info.yaml: {}", dist_mod.display());
     }
 
-    // 检查预览图
     let preview_png = dist_mod.join("preview.png");
     let preview_jpg = dist_mod.join("preview.jpg");
     let preview = if preview_png.exists() {
@@ -274,197 +381,111 @@ pub fn run(cfg: &Config, selected: &SelectedMod, use_gui: bool, auto_note: bool)
     } else if preview_jpg.exists() {
         preview_jpg
     } else {
-        println!("\n⚠️  {}", i18n::no_preview_image());
-        println!("{}", i18n::preview_required());
-        println!("{}", i18n::preview_suggestion(selected.config.project_abs(&repo_root).display().to_string()));
-        anyhow::bail!("{}", i18n::err_missing_preview());
+        anyhow::bail!(
+            "发布包缺少 preview.png 或 preview.jpg: {}",
+            dist_mod.display()
+        );
     };
 
-    // 强制使用 GUI
     if use_gui {
-        println!("\n📌 {}", i18n::forced_oniuploader());
         launch_uploader(&dist_mod, &preview);
         return Ok(());
     }
 
-    // 尝试 SteamCMD 全自动上传
-    if has_steamcmd() {
-        println!("\n📡 {}", i18n::steamcmd_detected());
-        let (title, desc, version) = read_mod_info(&dist_mod)
-            .unwrap_or_else(|| (selected.name.clone(), String::new(), "1.0.0".to_string()));
-        let project_dir = selected.config.project_abs(&repo_root);
-        let auto_changenote = extract_changelog_summary(&project_dir, 6);
-        let default_changenote = auto_changenote
-            .clone()
-            .unwrap_or_else(|| format!("Release {}", version));
+    let (mod_title, description, version) = read_mod_info(&dist_mod)
+        .unwrap_or_else(|| (selected.name.clone(), String::new(), "1.0.0".to_string()));
+    let title = selected.config.workshop_title.clone().unwrap_or(mod_title);
+    if description.trim().is_empty() {
+        anyhow::bail!("Steam 描述为空，请更新 docs/steam-description-*.md");
+    }
+    let description_chars = description.chars().count();
+    if description_chars > 8_000 {
+        anyhow::bail!("Steam 描述超过 8000 字符：{}", description_chars);
+    }
 
-        let changenote = if auto_note {
-            default_changenote.clone()
+    let project_dir = selected.config.project_abs(&repo_root);
+    let default_changenote = extract_changelog_summary(&project_dir, 6)
+        .unwrap_or_else(|| format!("Release {}", version));
+    let changenote = if auto_note || non_interactive || dry_run {
+        default_changenote
+    } else {
+        prompt(
+            &format!("更新说明 [默认: {}]: ", default_changenote),
+            Some(default_changenote.as_str()),
+        )?
+    };
+
+    let publishedfileid = if let Some(ref id) = selected.config.publishedfileid {
+        id.clone()
+    } else if non_interactive || dry_run {
+        anyhow::bail!("无人值守发布要求在 onim.toml 配置 publishedfileid");
+    } else {
+        let id = prompt("已有 Workshop ID？首次上传输入 0: ", Some("0"))?;
+        if id.trim().is_empty() {
+            "0".to_string()
         } else {
-            prompt(
-                &i18n::changelog_prompt(default_changenote.clone()),
-                Some(default_changenote.as_str()),
-            )?
-        };
-
-        let publishedfileid = if let Some(ref id) = selected.config.publishedfileid {
-            println!("{}", i18n::using_configured_workshop_id(id.to_string()));
-            id.clone()
-        } else {
-            let id = prompt(i18n::workshop_id_prompt(), Some("0"))?;
-            if id.trim().is_empty() {
-                "0".to_string()
-            } else {
-                id
-            }
-        };
-
-        let vdf = generate_vdf(
-            &dist_mod,
-            &preview,
-            &title,
-            &desc,
-            &changenote,
-            &publishedfileid,
-        )?;
-        println!("\n📤 {}", i18n::upload_starting());
-        println!("   vdf: {}", vdf.display());
-
-        let steam_user = prompt(i18n::steam_username_prompt(), None)?;
-        println!("\n📤 {}", i18n::uploading_wait());
-        let output = Command::new("steamcmd")
-            .args([
-                "+login",
-                &steam_user,
-                "+workshop_build_item",
-                &vdf.to_string_lossy(),
-                "+quit",
-            ])
-            .output()
-            .with_context(|| i18n::err_steamcmd_spawn())?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let full_output = format!("{} {}", stdout, stderr);
-
-        if output.status.success() {
-            // 尝试从输出中提取 Workshop ID
-            let workshop_id =
-                extract_workshop_id(&full_output).or_else(|| read_publishedfileid_from_vdf(&vdf));
-
-            println!("✅ {}", i18n::upload_done());
-            println!();
-
-            if let Some(ref id) = workshop_id {
-                println!("🔗 {}", i18n::workshop_link());
-                println!(
-                    "   https://steamcommunity.com/sharedfiles/filedetails/?id={}",
-                    id
-                );
-                println!();
-            } else if publishedfileid != "0" {
-                println!("🔗 {}", i18n::workshop_link());
-                println!(
-                    "   https://steamcommunity.com/sharedfiles/filedetails/?id={}",
-                    publishedfileid
-                );
-                println!();
-            }
-
-            println!("⚠️  {}", i18n::steamcmd_no_tags());
-            println!("{}", i18n::tags_manual_1());
-            println!("{}", i18n::tags_manual_2());
-            println!("{}", i18n::tags_manual_3());
-            println!("{}", i18n::tags_manual_4());
-            println!();
-
-            if workshop_id.is_none() && publishedfileid == "0" {
-                println!("{}", i18n::first_upload_id_saved(vdf.display().to_string()));
-            }
-        } else {
-            eprintln!("❌ {}", i18n::steamcmd_stderr(stderr.to_string()));
-            println!("\n{}", i18n::fallback_to_gui());
-            launch_uploader(&dist_mod, &preview);
+            id
         }
+    };
 
+    let legacy_vdf = dist_mod.join("workshop.vdf");
+    if legacy_vdf.exists() {
+        fs::remove_file(&legacy_vdf)
+            .with_context(|| format!("删除旧 VDF 失败: {}", legacy_vdf.display()))?;
+    }
+    let vdf = generate_vdf(
+        &dist_mod,
+        &preview,
+        &title,
+        &description,
+        &changenote,
+        &publishedfileid,
+    )?;
+    println!("   Workshop ID: {}", publishedfileid);
+    println!("   标题: {}", title);
+    println!("   描述: {} 字符", description_chars);
+    println!("   VDF: {}", vdf.display());
+
+    if dry_run {
+        println!("✅ 元数据 dry-run 通过；发布脚本会另行验证单文件 ZIP");
         return Ok(());
     }
 
-    // 回退到 OniUploader GUI
+    reject_directory_upload_for_oni(&vdf)?;
+
+    if non_interactive {
+        anyhow::bail!(
+            "无人值守发布请改用单 ZIP 发布器：scripts/publish_onimcp_steam.sh 或 scripts/publish_cycletrim_steam.sh"
+        );
+    }
+
     launch_uploader(&dist_mod, &preview);
     Ok(())
 }
 
-fn extract_workshop_id(output: &str) -> Option<String> {
-    // SteamCMD 输出中可能包含 "PublishedFileId" 或数字 ID
-    // 常见格式："PublishedFileId" "123456789" 或 Success. ID: 123456789
-    for line in output.lines() {
-        // 尝试匹配 "PublishedFileId" "12345"
-        if let Some(pos) = line.find("PublishedFileId") {
-            let rest = &line[pos..];
-            if let Some(start) = rest.find('"').and_then(|s| rest[s + 1..].find('"')) {
-                let after_first = &rest[start + 2..];
-                if let Some(end) = after_first.find('"') {
-                    let id = after_first[..end].trim();
-                    if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) {
-                        return Some(id.to_string());
-                    }
-                }
-            }
-        }
-        // 尝试匹配简单的数字 ID（8-12 位数字）
-        for word in line.split_whitespace() {
-            let clean = word.trim_matches(|c: char| !c.is_ascii_digit());
-            if clean.len() >= 8 && clean.len() <= 12 && clean.chars().all(|c| c.is_ascii_digit()) {
-                return Some(clean.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn read_publishedfileid_from_vdf(vdf: &PathBuf) -> Option<String> {
-    let content = fs::read_to_string(vdf).ok()?;
-    for line in content.lines() {
-        if line.contains("publishedfileid") {
-            if let Some((_, val)) = line.split_once('"') {
-                if let Some((_, val2)) = val.split_once('"') {
-                    if let Some((id, _)) = val2.split_once('"') {
-                        let id = id.trim();
-                        if !id.is_empty() && id != "0" && id.chars().all(|c| c.is_ascii_digit()) {
-                            return Some(id.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-fn launch_uploader(dist_mod: &PathBuf, preview: &PathBuf) {
+fn launch_uploader(dist_mod: &Path, preview: &Path) {
     let uploader = match uploader_path() {
         Some(p) => p,
         None => {
-            println!("\n❌ {}", i18n::no_upload_tool());
-            println!("{}", i18n::option_one());
-            println!("  Arch:    paru -S steamcmd");
-            println!("  Ubuntu:  sudo apt install steamcmd");
-            println!("{}", i18n::option_one_other());
+            println!("\n❌ 找不到 OniUploader！");
+            println!("从 Steam 库 → 工具 → 安装 'Oxygen Not Included Uploader'");
             println!();
-            println!("{}", i18n::option_two());
+            println!("不要改用 SteamCMD：它的 contentfolder 目录上传会把条目");
+            println!("单向转换为 UGC 目录模式，ONI 无法安装，且没有回退 API。");
+            println!("无人值守发布请用 scripts/publish_onimcp_steam.sh 或");
+            println!("scripts/publish_cycletrim_steam.sh 的单 ZIP 发布器。");
             return;
         }
     };
 
-    println!("\n📤 {}", i18n::launching_oniuploader());
+    println!("\n📤 启动 OniUploader...");
     println!("   {}", uploader.display());
     println!();
-    println!("{}", i18n::follow_steps());
-    println!("{}", i18n::step_add());
-    println!("{}", i18n::step_mod_dir(dist_mod.display().to_string()));
-    println!("{}", i18n::step_preview_ready(preview.display().to_string()));
-    println!("{}", i18n::step_publish());
+    println!("请按以下步骤操作：");
+    println!("  1. 点击 'Add' 添加新 Mod");
+    println!("  2. Mod 目录选择：{}", dist_mod.display());
+    println!("  3. 预览图已就绪：{}", preview.display());
+    println!("  4. 填写信息后点击 'Publish'");
     println!();
 
     #[cfg(target_os = "linux")]
@@ -481,4 +502,146 @@ fn launch_uploader(dist_mod: &PathBuf, preview: &PathBuf) {
     }
 
     let _ = Command::new(&uploader).spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+    use std::io;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    type TestResult = Result<(), Box<dyn Error>>;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        env::temp_dir().join(format!("onim-{name}-{}-{nonce}", std::process::id()))
+    }
+
+    #[test]
+    fn latest_changelog_accepts_plain_bullets() -> TestResult {
+        let content = "# Changelog\n\n## 2026-08-23\n\n- 修复空闲差事\n- Fix idle chores\n\n## 2026-07-17\n\n- [abc] older\n";
+        let summary = latest_changelog_summary(content, 6)
+            .ok_or_else(|| io::Error::other("latest section missing"))?;
+
+        assert!(summary.contains("- 修复空闲差事"));
+        assert!(summary.contains("- Fix idle chores"));
+        assert!(!summary.contains("older"));
+        Ok(())
+    }
+
+    #[test]
+    fn yaml_value_preserves_colons_and_quoted_comments() {
+        let yaml = r#"
+            title: "CycleTrim: Experimental"
+            description: 'Keep colon: and # hash'
+            version: 1.2.3 # release version
+        "#;
+
+        assert_eq!(
+            yaml_value(yaml, "title").as_deref(),
+            Some("CycleTrim: Experimental")
+        );
+        assert_eq!(
+            yaml_value(yaml, "description").as_deref(),
+            Some("Keep colon: and # hash")
+        );
+        assert_eq!(yaml_value(yaml, "version").as_deref(), Some("1.2.3"));
+        assert_eq!(
+            yaml_value("title: Bob's Mod # release note", "title").as_deref(),
+            Some("Bob's Mod")
+        );
+        assert_eq!(
+            yaml_value("title: 'Bob''s # Mod' # release note", "title").as_deref(),
+            Some("Bob's # Mod")
+        );
+    }
+
+    #[test]
+    fn vdf_paths_escape_keyvalues_characters() -> TestResult {
+        let path = Path::new("mods/quoted\"name\npreview.png");
+
+        assert_eq!(
+            vdf_path_value(path, "previewfile")?,
+            r#"mods/quoted\"name\npreview.png"#
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vdf_paths_reject_non_utf8() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let path = PathBuf::from(OsString::from_vec(vec![b'/', 0xff]));
+
+        assert!(vdf_path_value(&path, "contentfolder").is_err());
+    }
+
+    #[test]
+    fn steam_description_reads_flat_package_assets() -> TestResult {
+        let root = test_dir("description");
+        fs::create_dir_all(&root)?;
+        fs::write(root.join("steam-description-zh.md"), "中文说明")?;
+        fs::write(root.join("steam-description-en.md"), "English description")?;
+
+        let description = steam_markdown_description(&root)
+            .ok_or_else(|| io::Error::other("combined description missing"))?;
+
+        assert_eq!(description, "中文说明\n\nEnglish description");
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn generated_vdf_stays_outside_content_folder() -> TestResult {
+        let root = test_dir("vdf");
+        let content = root.join("CycleTrim");
+        fs::create_dir_all(&content)?;
+        let preview = content.join("preview.png");
+        fs::write(&preview, b"preview")?;
+
+        let vdf = generate_vdf(
+            &content,
+            &preview,
+            "CycleTrim",
+            "line one\nline two",
+            "fixed idle chores",
+            "3766318556",
+        )?;
+        let text = fs::read_to_string(&vdf)?;
+
+        assert_eq!(vdf, root.join("CycleTrim.workshop.vdf"));
+        assert!(text.contains("\"publishedfileid\"\t\"3766318556\""));
+        assert!(text.contains("line one\\nline two"));
+        assert!(!content.join("workshop.vdf").exists());
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn publish_guard_accepts_oni_appid_for_any_workshop_id() -> TestResult {
+        let root = test_dir("publish-guard");
+        fs::create_dir_all(&root)?;
+        let vdf = root.join("new-item.workshop.vdf");
+        fs::write(
+            &vdf,
+            "\"workshopitem\"\n{\n\"appid\" \"457140\"\n\"publishedfileid\" \"9999999999\"\n}\n",
+        )?;
+        assert!(reject_directory_upload_for_oni(&vdf).is_ok());
+
+        fs::write(&vdf, "\"workshopitem\"\n{\n\"appid\" \"12345\"\n}\n")?;
+        assert!(reject_directory_upload_for_oni(&vdf).is_err());
+
+        fs::write(&vdf, "\"workshopitem\"\n{\n\"publishedfileid\" \"457140\"\n}\n")?;
+        assert!(reject_directory_upload_for_oni(&vdf).is_err());
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
 }
