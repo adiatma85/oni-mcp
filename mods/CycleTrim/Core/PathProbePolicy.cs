@@ -2,6 +2,17 @@ using System;
 
 namespace CycleTrim.Core
 {
+    internal static class PathProbeAbilityFingerprint
+    {
+        internal static int Create(int prefabInstanceId, bool canTraverseSubmerged)
+        {
+            unchecked
+            {
+                return (prefabInstanceId * 397) ^ (canTraverseSubmerged ? 1 : 0);
+            }
+        }
+    }
+
     public readonly struct PathProbeStamp : IEquatable<PathProbeStamp>
     {
         public PathProbeStamp(
@@ -64,6 +75,16 @@ namespace CycleTrim.Core
                 return hash * 397 ^ AbilitiesFingerprint;
             }
         }
+
+        public static bool operator ==(PathProbeStamp left, PathProbeStamp right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(PathProbeStamp left, PathProbeStamp right)
+        {
+            return !left.Equals(right);
+        }
     }
 
     public sealed class PathProbeAdmissionState
@@ -95,6 +116,9 @@ namespace CycleTrim.Core
         {
             if (!supported)
             {
+                // Vanilla may replace the navigator's result with a probe whose
+                // abilities cannot be represented by this cache key.
+                Reset();
                 return true;
             }
             if (hasCompleted
@@ -107,12 +131,17 @@ namespace CycleTrim.Core
 
             queued = stamp;
             hasQueued = true;
+            // A replacement or bounded fallback must complete before another
+            // hit is possible, including when this queued order is discarded.
+            hasCompleted = false;
             consecutiveSkips = 0;
             return true;
         }
 
         public void MarkDequeued()
         {
+            // An untracked order must never inherit an earlier pending result.
+            hasInFlight = false;
             if (!hasQueued)
             {
                 return;
@@ -160,11 +189,15 @@ namespace CycleTrim.Core
     {
         public static int ComputeQueueQuota(int workerCount, int inFlightCount)
         {
-            if (workerCount < 0 || inFlightCount < 0)
+            if (workerCount < 0)
             {
-                throw new ArgumentOutOfRangeException();
+                throw new ArgumentOutOfRangeException(nameof(workerCount));
             }
-            return Math.Max(1, Math.Min(4, workerCount + 1 - inFlightCount));
+            if (inFlightCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(inFlightCount));
+            }
+            return (int)Math.Max(1L, Math.Min(4L, (long)workerCount + 1 - inFlightCount));
         }
     }
 }

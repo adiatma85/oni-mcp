@@ -14,6 +14,8 @@ namespace CycleTrim.Patches
             new ConditionalWeakTable<ChoreConsumer, State>();
         private static readonly ConditionalWeakTable<ChoreConsumer, State>.CreateValueCallback
             StateFactory = CreateState;
+        private static readonly AccessTools.FieldRef<Brain, ChoreConsumer> BrainChoreConsumer =
+            AccessTools.FieldRefAccess<Brain, ChoreConsumer>("choreConsumer");
 
         private sealed class State
         {
@@ -21,6 +23,13 @@ namespace CycleTrim.Patches
                 new VersionedRefreshGate(4);
             internal readonly VersionedRefreshGate ChoreGate =
                 new VersionedRefreshGate(4);
+            internal readonly bool IsDuplicant;
+            internal NavGrid NavGrid;
+
+            internal State(bool isDuplicant)
+            {
+                IsDuplicant = isDuplicant;
+            }
 
             internal void Invalidate()
             {
@@ -42,26 +51,45 @@ namespace CycleTrim.Patches
 
         private static State CreateState(ChoreConsumer consumer)
         {
-            return new State();
+            return new State(consumer.GetComponent<MinionIdentity>() != null);
+        }
+
+        private static bool IsBusyChore(Chore currentChore)
+        {
+            // ONI uses a non-null IdleChore as its fallback. Do not throttle the
+            // pickup and chore refreshes that let an idle duplicant find work.
+            return currentChore != null && !(currentChore is IdleChore);
         }
 
         private static bool TryGetDuplicantConsumer(
             PickupableSensor sensor,
+            Navigator navigator,
             out ChoreConsumer consumer,
-            out Navigator navigator)
+            out State state)
         {
             consumer = sensor.GetComponent<ChoreConsumer>();
-            navigator = sensor.GetComponent<Navigator>();
-            return consumer != null
-                && navigator != null
-                && sensor.GetComponent<MinionIdentity>() != null;
+            if (consumer == null || navigator == null)
+            {
+                state = null;
+                return false;
+            }
+
+            state = States.GetValue(consumer, StateFactory);
+            return state.IsDuplicant;
         }
 
         private static RefreshStamp CaptureStamp(
+            State state,
             ChoreConsumer consumer,
             Navigator navigator,
             Chore currentChore)
         {
+            if (!ReferenceEquals(state.NavGrid, navigator.NavGrid))
+            {
+                state.Reset();
+                state.NavGrid = navigator.NavGrid;
+            }
+
             ScheduleBlock scheduleBlock = null;
             var consumerState = consumer.consumerState;
             var schedulable = consumerState == null ? null : consumerState.schedulable;
@@ -77,7 +105,7 @@ namespace CycleTrim.Patches
                 InvalidationVersions.FetchVersion,
                 NavigationInvalidationVersions.Get(navigator.NavGrid),
                 InvalidationVersions.ChoreVersion,
-                Grid.PosToCell(navigator),
+                navigator.cachedCell,
                 RuntimeHelpers.GetHashCode(currentChore),
                 scheduleBlock == null ? 0 : RuntimeHelpers.GetHashCode(scheduleBlock),
                 navigationContext);
@@ -101,26 +129,28 @@ namespace CycleTrim.Patches
                         "CycleTrim could not find PickupableSensor.Update().");
             }
 
-            private static bool Prefix(PickupableSensor __instance)
+            private static bool Prefix(
+                PickupableSensor __instance,
+                Navigator ___navigator)
             {
                 if (!TryGetDuplicantConsumer(
                     __instance,
+                    ___navigator,
                     out var consumer,
-                    out var navigator))
+                    out var state))
                 {
                     return true;
                 }
 
-                var state = States.GetValue(consumer, StateFactory);
                 var currentChore = consumer.choreDriver.GetCurrentChore();
-                if (currentChore == null)
+                if (!IsBusyChore(currentChore))
                 {
                     state.Reset();
                     return true;
                 }
 
                 return state.PickupGate.ShouldRefresh(
-                    CaptureStamp(consumer, navigator, currentChore));
+                    CaptureStamp(state, consumer, ___navigator, currentChore));
             }
         }
 
@@ -153,13 +183,14 @@ namespace CycleTrim.Patches
                 }
 
                 var currentChore = __instance.choreDriver.GetCurrentChore();
-                if (currentChore == null)
+                if (!IsBusyChore(currentChore))
                 {
                     state.Reset();
                     return true;
                 }
 
-                var navigator = __instance.GetComponent<Navigator>();
+                var consumerState = __instance.consumerState;
+                var navigator = consumerState == null ? null : consumerState.navigator;
                 if (navigator == null)
                 {
                     state.Reset();
@@ -167,7 +198,7 @@ namespace CycleTrim.Patches
                 }
 
                 if (state.ChoreGate.ShouldRefresh(
-                    CaptureStamp(__instance, navigator, currentChore)))
+                    CaptureStamp(state, __instance, navigator, currentChore)))
                 {
                     return true;
                 }
@@ -198,15 +229,18 @@ namespace CycleTrim.Patches
 
             private static void Prefix(Brain brain)
             {
-                if (brain == null || brain.GetComponent<MinionIdentity>() == null)
+                if (brain == null)
                 {
                     return;
                 }
 
-                var consumer = brain.GetComponent<ChoreConsumer>();
-                if (consumer != null)
+                var consumer = BrainChoreConsumer(brain)
+                    ?? brain.GetComponent<ChoreConsumer>();
+                if (consumer != null
+                    && States.TryGetValue(consumer, out var state)
+                    && state.IsDuplicant)
                 {
-                    States.GetValue(consumer, StateFactory).Invalidate();
+                    state.Invalidate();
                 }
             }
         }

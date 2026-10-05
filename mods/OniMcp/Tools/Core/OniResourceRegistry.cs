@@ -28,12 +28,21 @@ namespace OniMcp.Tools
 
         public static ReadResourceResult ReadResource(string uri)
         {
-            if (string.IsNullOrEmpty(uri))
+            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed) || parsed.Scheme != "oni")
                 return null;
 
-            var resource = _resources.FirstOrDefault(item => item.Info.Uri == uri);
+            string resourceUri = parsed.GetLeftPart(UriPartial.Path).TrimEnd('/');
+            var resource = _resources.FirstOrDefault(item => item.Info.Uri.TrimEnd('/') == resourceUri);
             if (resource != null)
-                return ReadToolResource(uri, resource.ToolName, resource.Arguments != null ? new JObject(resource.Arguments) : new JObject(), resource.Info.MimeType);
+            {
+                var arguments = ParseQuery(parsed.Query);
+                if (resource.Arguments != null)
+                {
+                    foreach (var property in resource.Arguments.Properties())
+                        arguments[property.Name] = property.Value.DeepClone();
+                }
+                return ReadToolResource(uri, resource.ToolName, arguments, resource.Info.MimeType);
+            }
 
             return ReadDynamicResource(uri);
         }
@@ -63,15 +72,26 @@ namespace OniMcp.Tools
         private static ReadResourceResult ReadToolResource(string uri, string toolName, JObject arguments, string mimeType)
         {
             NormalizeResourceArguments(toolName, arguments);
-            EnsureResourceTaskDescription(uri, arguments);
-            var result = OniToolRegistry.CallToolFromResource(toolName, arguments);
+            if (!OniToolRegistry.TryGetOperation(toolName, out var operation))
+                return ErrorResource(uri, "Resource operation not found: " + toolName);
+
+            CallToolResult result;
+            try
+            {
+                // Resource routes select their read operation. resources/read has no
+                // tools/call task description and must not drain tool notifications.
+                result = operation.Handler(arguments ?? new JObject());
+            }
+            catch (Exception ex)
+            {
+                return ErrorResource(uri, "Resource operation error: " + ex.Message);
+            }
+
+            if (result == null)
+                return ErrorResource(uri, "Resource operation returned no result.");
             string text = ExtractText(result);
-            if (result != null && result.IsError)
-                text = JsonConvert.SerializeObject(new Dictionary<string, object>
-                {
-                    ["error"] = true,
-                    ["message"] = text
-                }, McpJsonUtil.Settings);
+            if (result.IsError)
+                return ErrorResource(uri, text);
 
             return new ReadResourceResult
             {
@@ -242,7 +262,7 @@ namespace OniMcp.Tools
             return string.Join("\n", result.Content.Where(content => content != null).Select(content => content.Text ?? "").ToArray());
         }
 
-        private static JObject ParseQuery(string query)
+        private static JObject ParseQuery(string query, bool allowOperationSelectors = false)
         {
             var result = new JObject();
             if (string.IsNullOrEmpty(query))
@@ -259,6 +279,13 @@ namespace OniMcp.Tools
                 if (string.IsNullOrEmpty(key))
                     continue;
 
+                // URI routes own operation selectors. Query strings supply filters;
+                // they cannot redirect a read to another domain or authorize writes.
+                if (key == "confirm" || key == "force" || (!allowOperationSelectors &&
+                    (key == "action" || key == "domain" || key == "uiDomain" ||
+                     key == "rocketDomain" || key == "bioDomain")))
+                    continue;
+
                 string value = parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : "";
                 if (string.IsNullOrEmpty(value))
                     continue;
@@ -267,22 +294,6 @@ namespace OniMcp.Tools
             }
 
             return result;
-        }
-
-        private static OniResource Resource(string uri, string name, string title, string description, string toolName)
-        {
-            return new OniResource
-            {
-                Info = new McpResourceInfo
-                {
-                    Uri = uri,
-                    Name = name,
-                    Title = title,
-                    Description = description,
-                    MimeType = "application/json"
-                },
-                ToolName = toolName
-            };
         }
 
         /// <summary>

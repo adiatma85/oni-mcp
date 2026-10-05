@@ -33,7 +33,7 @@
 
 > **兼容性警告**：`OniMcp` 在 `1.0.0` 之前 API 仍可能发生不兼容变更。二创、插件、脚本或第三方客户端请锁定具体版本，并以运行时 `tools_manifest` / `oni://tools/manifest` 为准做兼容适配。
 
-> **开源激励计划**：可购买 token，也可以通过参与开源项目贡献赚取 token。项目地址：[api.lmm.best](https://api.lmm.best)。项目源代码开源，欢迎使用与贡献。
+> **开源激励计划**：可购买 token，也可以通过参与开源项目贡献赚取 token。服务地址：[api.lmm.best](https://api.lmm.best)；[项目源码](https://github.com/TokenNotIncluded/api.lmm.best)由 [TokenNotIncluded](https://github.com/TokenNotIncluded) 组织托管，欢迎使用与贡献。
 
 ## 快速入口
 
@@ -49,6 +49,10 @@
 ## ONI MCP Server
 
 [ONI MCP Server 文档](mods/OniMcp/README.md)
+
+支持 OniMcp 的开发与测试：[捐赠](https://donate.lmm.best/?project=onimcp)。
+
+[![OniMcp 捐赠进度](https://donate.lmm.best/badge.svg?project=onimcp&currency=CNY&lang=zh-CN&period=all&layout=compact&theme=dark&width=360&title=OniMCP)](https://donate.lmm.best/?project=onimcp)
 
 <details>
 <summary>展开 Mod 介绍</summary>
@@ -173,6 +177,10 @@ cp Directory.Build.props.example Directory.Build.props
 ```
 
 ## 依赖
+
+代码回归检查：安装 Python 3 与 .NET SDK 10 后运行
+`python3 scripts/check_mods.py`。该入口不需要安装游戏；完整构建与游戏内验证步骤见
+[Mod 测试说明](docs/mod-testing.md)。
 
 - [Rust](https://rustup.rs/)：编译 `onim`
 - [.NET SDK](https://dotnet.microsoft.com/download)：构建 Mod

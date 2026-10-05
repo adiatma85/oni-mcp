@@ -2,6 +2,34 @@
 
 Generated from `git log -- mods/OniMcp`.
 
+## 2026-09-23 — 0.2.5
+
+- Switch Workshop packaging to a single legacy ZIP. Steam downloaded the earlier directory package, but ONI's mod loader rejected it; the release gate requires Steam LegacyItem and in-game load verification.
+- Reject queued MCP work admitted before a save-load context change so it cannot run against the newly loaded world.
+- Clarify that the `购买 AI Token / 支持项目` link opens `https://api.lmm.best` for an optional purchase, unrelated to OniMcp's local authentication token.
+
+## 2026-09-23 — 0.2.4
+
+- Add the modern MCP protocol path and discovery while retaining legacy client compatibility.
+- Validate protocol versions, HTTP media types, JSON-RPC payloads, and modern request and result metadata before accepting work.
+- Bound legacy sessions and queued tasks, clean up expired work, and isolate tool-call state between requests.
+- Harden sandbox and world-editor routing, error reporting, and resource URI handling.
+- Report the package version consistently in legacy and modern `serverInfo` responses.
+- Keep the options dialog compact, mask the editable token field, and add an optional `https://api.lmm.best` project-support button. Automated checks and the PLib UI call chain were verified; full in-game click-through remains unverified.
+
+## 2026-09-12 — 0.2.3
+
+- Fix resource dispatch and JSON-RPC null responses; preserve tool visibility and protect cached metadata from caller mutation.
+- Cancel queued main-thread calls after timeout; clean up sessions and restrict task access to the owning session.
+- Save configuration through an atomic replacement and preserve existing settings when a reload fails. Invalid configuration on first load now stops initialization instead of replacing the file with defaults.
+- Report failed batch operations as errors, validate agent program structure before execution, and bound user-supplied regular expression matching.
+- Add executable regression suites and a shared `scripts/check_mods.py` CI entry point. Full game builds and Unity/Harmony integration remain separate release checks.
+
+## 2026-08-23 — 0.2.2
+
+- 移除 OniMcp 源码中的 680 条未使用 `using`，补齐解决方案与 .NET Framework 引用程序集配置；Release 构建在警告即错误模式下通过。
+- Remove 680 unused `using` directives, add solution and .NET Framework reference-assembly support, and pass the Release build with warnings treated as errors.
+- MCP 工具、协议与存档行为不变。 / MCP tools, protocol behavior, and save behavior are unchanged.
 
 - [21dc419](https://github.com/LIghtJUNction/OniMods/commit/21dc419c4263437a3b2158221b6d93811ab074cd): 2026-07-17 - feat(oni-mcp): add duplicant speech bubbles
 - [7dd8664](https://github.com/LIghtJUNction/OniMods/commit/7dd866439b378f397c1e9db4577a72aadba200ff): 2026-07-17 - fix(oni-mcp): preserve completed restart jobs

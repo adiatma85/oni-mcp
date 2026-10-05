@@ -15,6 +15,7 @@ mod init;
 mod install;
 mod publish;
 mod setup;
+mod steam;
 mod uninstall;
 
 #[derive(Parser)]
@@ -78,12 +79,18 @@ enum Commands {
     Info,
     /// Publish to the Steam Workshop
     Publish {
-        /// Force the OniUploader GUI instead of SteamCMD
+        /// Force the OniUploader GUI and skip the update-note prompt
         #[arg(long)]
         gui: bool,
         /// Use the latest changelog entry as the upload note, without prompting
         #[arg(long)]
         auto_note: bool,
+        /// 禁止所有提示；不启动 GUI，只提示改用单 ZIP 发布脚本
+        #[arg(long, visible_alias = "yes", conflicts_with = "gui")]
+        non_interactive: bool,
+        /// 仅构建并生成 Workshop VDF，不上传
+        #[arg(long, conflicts_with = "gui")]
+        dry_run: bool,
     },
     /// List every configured mod
     List,
@@ -162,9 +169,23 @@ fn main() -> Result<()> {
             uninstall::run(&cfg, &selected, scope)
         }
         Commands::Info => info::run(&cfg),
-        Commands::Publish { gui, auto_note } => {
+        Commands::Publish {
+            gui,
+            auto_note,
+            non_interactive,
+            dry_run,
+        } => {
             let selected = cfg.select_mod(cli.r#mod)?;
-            publish::run(&cfg, &selected, gui, auto_note)
+            publish::run(
+                &cfg,
+                &selected,
+                publish::PublishOptions {
+                    use_gui: gui,
+                    auto_note,
+                    non_interactive,
+                    dry_run,
+                },
+            )
         }
         Commands::List => {
             println!("{}", i18n::configured_mods());

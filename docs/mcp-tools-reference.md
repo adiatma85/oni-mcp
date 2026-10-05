@@ -5,20 +5,23 @@
 ## 快速开始
 
 - MCP 地址: `http://localhost:8788/mcp/`
-- 协议版本: `2025-11-25`
-- Default public tools: 7 entrypoints: `world_editor`, `game_control`, `navigation_control`, `building_control`, `orders_control`, `server_control`, `benchmark`
+- 协议兼容: `2026-07-28` 无会话兼容路径 + `2025-11-25` / `2025-06-18` legacy initialize/session 路径
+- Legacy/default public tools: 7 entrypoints: `benchmark`, `world_editor`, `game_control`, `navigation_control`, `building_control`, `orders_control`, `server_control`
+- Modern `2026-07-28` `tools/list`: 当前只广告只读 `benchmark`
 - 旧聚合入口: 仅作为虚拟文件工作流的内部操作，不再注册为 MCP 工具
 - `coordinate_control` 不属于当前公开运行时；普通聚合工具拒绝 raw coordinates
 - Tool descriptions: default-public tool descriptions and parameter descriptions are in English
 
-非 `initialize` 请求必须携带会话协商后的 `Mcp-Session-Id` 和 `Mcp-Protocol-Version`。
+现代 `2026-07-28` 请求不使用 `initialize`，也不要求或返回 `Mcp-Session-Id`。每个请求携带 `_meta`、`MCP-Protocol-Version` 和 `Mcp-Method`；`resources/read` / `tools/call` 等有具体资源或工具名的请求还需匹配的 `Mcp-Name`。推荐先调用 `server/discover` 并以实际 capability 为准。
+
+Legacy `2025-11-25` / `2025-06-18` 客户端继续先调用 `initialize`，随后请求携带协商得到的 `Mcp-Session-Id` 和 `Mcp-Protocol-Version`。
 
 ## 定位与执行原则
 
 Authoritative model:
 
 - Saves are directories. `latest/` is the fixed alias for the current/latest save.
-- `cd latest` enters the save; `cd` or `cd ~` exits back to `/`, representing the main menu/root.
+- `cd latest` enters a save; `cd` or `cd ~` exits back to `/`, representing the main menu/root.
 - Save contents are structured world files such as `map/terrain.oni`, `buildings/plans.oni`, `infrastructure/power.oni`, and `views/power.png`.
 - There are no action patch files. World changes use `world_editor command=edit`; prefer one SEARCH/REPLACE block. Multiple blocks require outer `allowPartial=true` and cannot be transactionally rolled back.
 - Reading the same file again is the observation step after an edit.
@@ -45,18 +48,18 @@ a virtual folder and exposes map views as files:
 
 Search, planning, actions, building, orders, navigation, game actions, dupe
 actions, and coordinate fallback are routed through `world_editor`. The default
-public surface also keeps `game_control`, `navigation_control`, `building_control`,
-`orders_control`, and `server_control` available for direct focused calls. Other
-former aggregate entrypoints are internal-only virtual-file operations and are
-not callable as MCP tools.
+public surface also keeps `benchmark`, `game_control`, `navigation_control`,
+`building_control`, `orders_control`, and `server_control` available for direct
+focused calls. Other former aggregate entrypoints are internal-only virtual-file
+operations and are not callable as MCP tools.
 
 新工具面按搜索/动作优先设计:
 
 - 优先使用 `query`、`target`、`search`、`name`、`id`、`areaId`。
-- Use `search_control` for dedicated search. It returns `searchResult`, `nextActions`, and `searchActionPatch`, so selecting a result is structurally tied to the next action call like a search/replace edit.
+- For dedicated search, use `world_editor command=search` or the typed `/active/ops/search.md` workflow. The underlying `search_control` operation is internal and is not a direct MCP tool.
 - Public aggregate tools do not accept raw `x/y`, `x1/y1/x2/y2`, `dx/dy`, `points`, or `anchors`. For exact orders, read `/active/ops/tools.md` and edit `/active/ops/orders.md`; use only currently public typed files/tools and ignore hidden `coordinate_control` and `/active/ops/coordinate.md` compatibility entries.
 - 面向任务的返回应尽量包含 `reachable`、`executable`、失败原因、缺失条件和建议下一步。
-- 区域动作优先先用 `read_control domain=area action=define` 生成 `areaId`，再传给支持区域的工具。
+- 需要定义区域并取得 `areaId` 时，通过 `world_editor` 的 typed `/active/ops/read.md` 工作流完成；底层 `read_control` 是 internal operation，不应作为 MCP 工具直接调用。
 - 写入、执行和危险动作应支持 `dryRun` 或 `confirm`，并在执行后重新读取状态验证。
 - 危险或大范围精确操作必须保持 pause -> read/plan -> dry-run -> confirm -> verify。
 
@@ -64,15 +67,13 @@ not callable as MCP tools.
 
 | 工具 | 主要 domain/action | 风险 | 用途 |
 |------|--------------------|------|------|
-| `server_control` | `catalog`, `strategy`, `batch`, `program` | read/execute | 健康检查、工具清单、工具搜索、目标指南、攻略知识库、批量调用、agent program |
-| `read_control` | `world`, `area`, `resources`, `buildings`, `knowledge`, `infrastructure` | read | 世界地图、区域、资源、建筑、机制知识、电力和房间摘要 |
-| `search_control` | `tools`, `world`, `resources`, `buildings`, `dupes`, `knowledge` | read | Dedicated search with action-ready `nextActions` |
+| `benchmark` | `cases`, `iterations`, `tool`, `includeDetails` | read | 固定工具链路基准与诊断，不修改游戏状态 |
+| `world_editor` | `cd`, `ls`, `read`, `search`, `edit`, `plan`, `connect` | read/write/execute | 虚拟文件化世界访问、搜索、规划与受控编辑 |
+| `server_control` | `catalog`, `batch`, `program` | read/execute | 健康检查、工具清单、工具搜索、目标指南、批量调用、agent program |
 | `game_control` | `speed`, `state`, `save`, `sandbox`, `ui` | read/execute/dangerous | 暂停、恢复、调速、存档、沙盒、UI 编辑标记 |
 | `navigation_control` | `camera` 或按已知相机 `action` 推断 | execute | 相机移动、世界切换、覆盖层、聚焦和截图 |
 | `building_control` | `planning`, `config`, `storage`, `filter`, `production`, `side_surface`, `rocket` | read/write/execute | 建造规划、材料检查、蓝图、建筑侧屏配置、储存过滤、生产队列、火箭 |
 | `orders_control` | `area`, `priority`, `designation`, `conduit` | execute/dangerous | 挖掘、清扫、拖地、拆除、优先级、区域订单、线路/管线剪断 |
-| `dupes_control` | `info`, `priority`, `command`, `skill`, `hat`, `assignable` | read/write/execute | 复制人状态、命令、优先级、改名、技能、帽子、可分配物 |
-| `colony_control` | `snapshot`, `read`, `report`, `diagnostic`, `notification`, `management`, `bio` | read/write | 殖民地快照、报告、诊断、通知、日程、饮食、研究、医疗、农牧 |
 
 ## 攻略知识库
 
@@ -147,7 +148,7 @@ For semantic building, prefer `plan`, `blueprint`, `areaId`, search results, or 
 
 示例:
 
-Prefer one SEARCH/REPLACE block. Multiple blocks require outer `allowPartial=true` and cannot be transactionally rolled back. Each operation-file replacement must contain exactly one executable command. Preview with outer `world_editor edit` `dryRun=true` and `confirm=false` (or omitted); execute with a new edit using outer `dryRun=false` and `confirm=true`, with non-conflicting command flags, then re-read the map or state.
+Prefer one SEARCH/REPLACE block. Multiple blocks require outer `allowPartial=true` and cannot be transactionally rolled back. Each operation-file replacement must contain exactly one executable command. Preview with outer `world_editor edit` `dryRun=true` and `confirm=false` (or omitted); execute with a new edit using outer `dryRun=false`, `confirm=true`, and non-conflicting command flags, then re-read the map or state.
 
 This directly creates a continuous line, with no separate follow-up connection step required.
 
@@ -232,10 +233,12 @@ Prefer extending aggregate entrypoints in `Tools/Entry/` for new public capabili
 
 ## 兼容性说明
 
-旧版工具仍可用于兼容历史客户端，但不再推荐新集成直接依赖。新客户端应:
+新客户端建议按双协议处理：
 
-1. Call `tools/list` to get the 6 default-public entrypoints.
-2. 调用 `server_control domain=catalog action=search` 或读取 `oni://tools/guide` 查找目标流程。
-3. 优先传语义定位参数。
-4. 对危险动作传 `confirm: true`。
-5. 执行后读取资源或区域快照验证状态。
+1. 优先以 `2026-07-28` 调用 `server/discover`，使用返回的 capability；现代请求不发送 `Mcp-Session-Id`。
+2. 若目标服务端只支持旧协议，再走 `initialize` + `Mcp-Session-Id` 的 `2025-11-25` / `2025-06-18` 路径。
+3. 不要硬编码旧版细粒度工具列表；按当前协议调用 `tools/list` 或读取运行时 manifest。
+4. 调用 `server_control domain=catalog action=search` 或读取 `oni://tools/guide` 查找目标流程。
+5. 优先传语义定位参数。
+6. 对危险动作传 `confirm: true`。
+7. 执行后读取资源或区域快照验证状态。

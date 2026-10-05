@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using UnityEngine;
@@ -10,7 +8,7 @@ namespace OniMcp.Tools
     {
         private static void AppendCellPortSnapshot(StringBuilder sb, int cell)
         {
-            var buildingObject = Grid.Objects[cell, (int)ObjectLayer.Building];
+            var buildingObject = CellBuildingObject(cell);
             var building = buildingObject != null ? buildingObject.GetComponent<Building>() : null;
             if (building == null || building.Def == null)
                 return;

@@ -14,9 +14,9 @@ namespace OniMcp.Tools
             if (pattern == "?" || pattern == "*" || pattern == ".*")
                 return true;
             if (pattern.Length >= 2 && pattern[0] == '/' && pattern[pattern.Length - 1] == '/')
-                return Regex.IsMatch(actual ?? string.Empty, pattern.Substring(1, pattern.Length - 2));
+                return Regex.IsMatch(actual ?? string.Empty, pattern.Substring(1, pattern.Length - 2), RegexOptions.None, RegexMatchTimeout);
             if (pattern.StartsWith("~", StringComparison.Ordinal) && pattern.Length > 1)
-                return Regex.IsMatch(actual ?? string.Empty, pattern.Substring(1));
+                return Regex.IsMatch(actual ?? string.Empty, pattern.Substring(1), RegexOptions.None, RegexMatchTimeout);
             // Map rendering appends @(x,y) on the first cell of a building run.
             // Agents often strip that suffix when copying SEARCH tokens; treat both forms equal.
             string normalizedActual = NormalizeMapCompareToken(actual);
@@ -79,13 +79,6 @@ namespace OniMcp.Tools
             string name = ExtractBuildTokenName(token);
             if (!string.IsNullOrWhiteSpace(name) && name.Length > 1)
             {
-                var aliases = BuildPlanningTools.PlanBuildingAliases();
-                if (aliases != null && aliases.TryGetValue(name, out string aliasPrefabId))
-                {
-                    prefabId = aliasPrefabId;
-                    return true;
-                }
-
                 foreach (var def in Assets.BuildingDefs)
                 {
                     if (def == null || string.IsNullOrEmpty(def.PrefabID))
@@ -93,21 +86,8 @@ namespace OniMcp.Tools
                     string id = MapTokenPart(def.PrefabID);
                     string proper = MapTokenPart(def.Name);
                     if (string.Equals(id, name, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(proper, name, StringComparison.OrdinalIgnoreCase))
-                    {
-                        prefabId = def.PrefabID;
-                        return true;
-                    }
-                }
-
-                foreach (var def in Assets.BuildingDefs)
-                {
-                    if (def == null || string.IsNullOrEmpty(def.PrefabID))
-                        continue;
-                    string id = MapTokenPart(def.PrefabID);
-                    string proper = MapTokenPart(def.Name);
-                    if (id.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0
-                        || proper.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
+                        || string.Equals(proper, name, StringComparison.OrdinalIgnoreCase)
+                        || id.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         prefabId = def.PrefabID;
                         return true;

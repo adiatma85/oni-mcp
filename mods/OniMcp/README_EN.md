@@ -4,6 +4,10 @@
 
 ONI MCP Server is an Oxygen Not Included mod that exposes a local MCP service (`http://localhost:8788/mcp/`) with `oni://` resources for colony introspection and controlled actions, designed for safe AI/client interaction.
 
+Support OniMcp development and testing: [Donate](https://donate.lmm.best/?project=onimcp).
+
+[![OniMcp donation progress](https://donate.lmm.best/badge.svg?project=onimcp&currency=CNY&lang=en&period=all&layout=compact&theme=dark&width=360&title=OniMCP)](https://donate.lmm.best/?project=onimcp)
+
 ## Index
 
 - [What It Is](https://github.com/LIghtJUNction/OniMods/blob/main/mods/OniMcp/README_EN.md#what-it-is)
@@ -54,6 +58,7 @@ ONI MCP Server is an Oxygen Not Included mod that exposes a local MCP service (`
 
 - Manifest entry point: `oni://tools/manifest` or `server_control domain=catalog action=manifest`
 - Default public aggregates:
+  - `benchmark`: read-only tool-path benchmark and diagnostics
   - `world_editor`: virtualized world access (`cd`, `ls`, `read`, `search`, `edit`)
   - `game_control`: gameplay state and control
   - `navigation_control`: camera, overlays, screenshots
@@ -77,6 +82,9 @@ ONI MCP Server is an Oxygen Not Included mod that exposes a local MCP service (`
 
 - Before `1.0.0`, tool names, parameters, and response fields can change.
 - Third-party clients should pin versions and use runtime manifest as the compatibility source.
+- `2025-11-25` / `2025-06-18` clients keep the full `initialize` + `Mcp-Session-Id` tool path.
+- `2026-07-28` has a stateless compatibility path for `server/discover`, `resources/list`, `resources/templates/list`, `resources/read`, plus a deliberately narrow tool slice: `tools/list` advertises only the read-only `benchmark` tool and `tools/call` accepts only that tool. Modern requests require `_meta`, `Mcp-Protocol-Version`, and `Mcp-Method`; resource reads and tool calls also require a matching `Mcp-Name`. The modern path never creates or returns `Mcp-Session-Id`.
+- The modern path does not expose the legacy core Tasks fields and does not yet advertise Tasks, MRTR, subscriptions, or game-mutating tools. Those tools stay on the 2025 session path until request-scoped state and their 2026 header/schema contracts are migrated.
 
 ## Updates and Validation
 

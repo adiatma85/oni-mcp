@@ -1,12 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Net;
-using System.Text;
 using System.Threading;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using OniMcp.Config;
 using OniMcp.Core;
 using OniMcp.Support;
@@ -20,10 +15,13 @@ namespace OniMcp.Server
     /// 基于 System.Net.HttpListener（.NET Framework 内置）
     /// </summary>
     public partial class McpHttpServer : MonoBehaviour
-{
+    {
         public static McpHttpServer Instance { get; private set; }
 
         private static readonly AsyncLocal<string> CurrentSessionContext = new AsyncLocal<string>();
+
+        private static readonly string ServerVersion =
+            typeof(McpHttpServer).Assembly.GetName().Version?.ToString(3) ?? "unknown";
 
         private HttpListener _listener;
 
@@ -32,8 +30,6 @@ namespace OniMcp.Server
         private volatile bool _running;
 
         private readonly Dictionary<string, McpSession> _sessions = new Dictionary<string, McpSession>();
-
-        private readonly HashSet<string> _terminatedSessions = new HashSet<string>();
 
         private readonly object _sessionLock = new object();
 
@@ -90,7 +86,8 @@ namespace OniMcp.Server
                 _listener.Start();
                 _running = true;
 
-                _listenerThread = new Thread(ListenLoop)
+                var listener = _listener;
+                _listenerThread = new Thread(() => ListenLoop(listener))
                 {
                     IsBackground = true,
                     Name = "OniMcpHttpListener"
@@ -101,6 +98,9 @@ namespace OniMcp.Server
             }
             catch (Exception ex)
             {
+                _running = false;
+                try { _listener?.Close(); } catch { }
+                _listener = null;
                 OniMcpLog.Error($"[OniMcp] Failed to start MCP Server: {ex.Message}");
             }
         }
@@ -114,6 +114,9 @@ namespace OniMcp.Server
         public void StopServer()
         {
             _running = false;
+            ResetHttpFrontDoorAdmission();
+            ResetLegacySseAdmission();
+            ResetMainThreadHttpAdmission();
             try
             {
                 _listener?.Stop();
@@ -129,8 +132,9 @@ namespace OniMcp.Server
 
             lock (_sessionLock)
             {
+                foreach (var session in _sessions.Values)
+                    session.Close();
                 _sessions.Clear();
-                _terminatedSessions.Clear();
             }
             lock (_taskLock)
             {
@@ -142,14 +146,51 @@ namespace OniMcp.Server
             OniMcpLog.Debug("[OniMcp] MCP Server stopped.");
         }
 
-        private void ListenLoop()
+        private void ListenLoop(HttpListener listener)
         {
-            while (_running)
+            while (_running && ReferenceEquals(listener, _listener))
             {
                 try
                 {
-                    var context = _listener.GetContext();
-                    ThreadPool.QueueUserWorkItem(_ => ProcessRequest(context));
+                    var context = listener.GetContext();
+                    HttpFrontDoorAdmissionLease admission;
+                    if (!TryAcquireHttpFrontDoorAdmission(out admission))
+                    {
+                        RejectHttpFrontDoorBusy(context.Response);
+                        continue;
+                    }
+
+                    try
+                    {
+                        // Do not put potentially blocking request-body reads on the CLR thread pool.
+                        // A bounded set of dedicated request workers keeps HttpListener's own async
+                        // machinery responsive enough for the listener thread to reject overloads.
+                        var requestThread = new Thread(() =>
+                        {
+                            try
+                            {
+                                if (admission.IsCurrentGeneration() && ReferenceEquals(listener, _listener))
+                                    ProcessRequest(context, admission);
+                                else
+                                    CloseStaleHttpResponse(context.Response);
+                            }
+                            finally
+                            {
+                                admission.Release();
+                            }
+                        })
+                        {
+                            IsBackground = true,
+                            Name = "OniMcpHttpRequest"
+                        };
+                        requestThread.Start();
+                    }
+                    catch
+                    {
+                        admission.Release();
+                        CloseStaleHttpResponse(context.Response);
+                        throw;
+                    }
                 }
                 catch (HttpListenerException)
                 {
@@ -166,7 +207,7 @@ namespace OniMcp.Server
             }
         }
 
-        private void ProcessRequest(HttpListenerContext context)
+        private void ProcessRequest(HttpListenerContext context, HttpFrontDoorAdmissionLease frontDoorAdmission)
         {
             var request = context.Request;
             var response = context.Response;
@@ -183,7 +224,7 @@ namespace OniMcp.Server
                 ApplyCorsHeaders(response, corsOrigin);
 
                 response.Headers.Add("Access-Control-Allow-Methods", "GET, HEAD, POST, DELETE, OPTIONS");
-                response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Accept, Authorization, X-Oni-Mcp-Token");
+                response.Headers.Add("Access-Control-Allow-Headers", BuildModernCorsAllowedHeaders());
                 response.Headers.Add("Access-Control-Expose-Headers", "Mcp-Session-Id, Mcp-Protocol-Version");
 
                 if (request.HttpMethod == "OPTIONS")
@@ -216,6 +257,15 @@ namespace OniMcp.Server
 
                 string sessionId = request.Headers["Mcp-Session-Id"];
                 string protocolVersion = request.Headers["Mcp-Protocol-Version"];
+
+                if (string.Equals(protocolVersion, ModernProtocolVersion, StringComparison.Ordinal)
+                    && (request.HttpMethod == "GET" || request.HttpMethod == "DELETE"))
+                {
+                    response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
+                    response.ContentLength64 = 0;
+                    response.Close();
+                    return;
+                }
 
                 if (request.HttpMethod == "HEAD")
                 {
@@ -252,7 +302,28 @@ namespace OniMcp.Server
                         {
                             SetResponseSessionId(response, sessionId);
                             SetResponseProtocolVersion(response, sessionId);
-                            HandleGet(request, response, sessionId);
+                            if (!AcceptsEventStream(request))
+                            {
+                                HandleGet(request, response, sessionId);
+                                break;
+                            }
+
+                            LegacySseAdmissionLease sseAdmission;
+                            if (!TryAcquireLegacySseAdmission(response, out sseAdmission))
+                                break;
+
+                            // The front-door lease exists to bound finite/pre-body request work.
+                            // Once a validated legacy GET is admitted to the separate bounded SSE
+                            // pool, release that finite-request slot before entering the stream loop.
+                            frontDoorAdmission.Release();
+                            try
+                            {
+                                HandleGet(request, response, sessionId);
+                            }
+                            finally
+                            {
+                                sseAdmission.Release();
+                            }
                         }
                         break;
                     case "DELETE":
@@ -280,5 +351,5 @@ namespace OniMcp.Server
                 catch { }
             }
         }
-}
+    }
 }

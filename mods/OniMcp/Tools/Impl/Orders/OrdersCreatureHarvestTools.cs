@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Klei.Input;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using OniMcp.Core;
 using UnityEngine;
 using OniMcp.Support;
@@ -11,7 +9,7 @@ using OniMcp.Support;
 namespace OniMcp.Tools
 {
     public static partial class OrdersTools
-{
+    {
         public static McpTool HarvestArea()
         {
             return new McpTool
@@ -96,7 +94,7 @@ namespace OniMcp.Tools
                         else
                         {
                             bool canHarvest = harvestable.CanBeHarvested();
-                            if (readyOnly && !canHarvest)
+                            if (!HarvestMarkPolicy.ShouldMarkNow(canHarvest, readyOnly))
                             {
                                 notReady++;
                                 skipped++;
@@ -333,5 +331,5 @@ namespace OniMcp.Tools
                 ["hasClearable"] = pickupable.GetComponent<Clearable>() != null
             });
         }
-}
+    }
 }

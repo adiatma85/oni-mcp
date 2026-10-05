@@ -112,7 +112,7 @@ namespace OniMcp.Tools
             };
         }
 
-        internal static Dictionary<string, string> PlanBuildingAliases()
+        private static Dictionary<string, string> PlanBuildingAliases()
         {
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
